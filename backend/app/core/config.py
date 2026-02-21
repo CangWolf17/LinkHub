@@ -4,7 +4,23 @@
 此处仅定义应用启动所需的静态配置。
 """
 
+from __future__ import annotations
+
+import json
+import logging
 from pathlib import Path
+from typing import TypedDict
+
+logger = logging.getLogger(__name__)
+
+
+# ── 目录条目类型 ──────────────────────────────────────────
+class DirEntry(TypedDict):
+    """白名单目录条目：包含路径和类型（software/workspace）"""
+
+    path: str
+    type: str  # "software" | "workspace"
+
 
 # ── 路径配置 ──────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
@@ -23,10 +39,14 @@ APP_PORT = 8147
 # ── OS Bridge 白名单默认值 ────────────────────────────────
 # 这些默认值仅在 system_settings 表中尚未配置时使用。
 # 运行时以数据库中 `allowed_dirs` 的值为准。
-DEFAULT_ALLOWED_DIRS: list[str] = [
-    r"D:\GreenSoftwares",
-    r"F:\WorkSpace",
-]
+# 格式: [{"path": "C:\\...", "type": "software"|"workspace"}]
+DEFAULT_ALLOWED_DIRS: list[DirEntry] = []
+
+
+# ── 目录类型常量 ──────────────────────────────────────────
+DIR_TYPE_SOFTWARE = "software"
+DIR_TYPE_WORKSPACE = "workspace"
+VALID_DIR_TYPES = {DIR_TYPE_SOFTWARE, DIR_TYPE_WORKSPACE}
 
 # ── 可执行文件白名单后缀 ──────────────────────────────────
 ALLOWED_EXECUTABLE_SUFFIXES: set[str] = {".exe", ".bat", ".cmd", ".lnk"}
@@ -43,3 +63,54 @@ EXE_PRIORITY_KEYWORDS: list[str] = [
     "app",
     "setup",
 ]
+
+
+# ── allowed_dirs 解析辅助函数 ─────────────────────────────
+
+
+def parse_allowed_dirs(raw_json: str) -> list[DirEntry]:
+    """
+    解析 allowed_dirs 的 JSON 字符串，兼容新旧两种格式：
+      - 新格式: [{"path": "C:\\...", "type": "software"}, ...]
+      - 旧格式: ["C:\\...", "D:\\..."]（回退为 type=software）
+    返回规范化的 DirEntry 列表。
+    """
+    if not raw_json:
+        return []
+    try:
+        parsed = json.loads(raw_json)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("allowed_dirs JSON 解析失败: %s", raw_json[:100])
+        return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    entries: list[DirEntry] = []
+    for item in parsed:
+        if isinstance(item, dict):
+            p = str(item.get("path", "")).strip()
+            t = str(item.get("type", DIR_TYPE_SOFTWARE)).strip()
+            if p and t in VALID_DIR_TYPES:
+                entries.append(DirEntry(path=p, type=t))
+        elif isinstance(item, str):
+            # 向后兼容：旧格式字符串数组，默认视为 software
+            p = item.strip()
+            if p:
+                entries.append(DirEntry(path=p, type=DIR_TYPE_SOFTWARE))
+    return entries
+
+
+def filter_dirs_by_type(entries: list[DirEntry], dir_type: str) -> list[Path]:
+    """按类型过滤目录条目，返回 Path 列表。"""
+    return [Path(e["path"]) for e in entries if e["type"] == dir_type]
+
+
+def all_dir_paths(entries: list[DirEntry]) -> list[Path]:
+    """返回所有目录条目的 Path 列表（不过滤类型）。"""
+    return [Path(e["path"]) for e in entries]
+
+
+def serialize_allowed_dirs(entries: list[DirEntry]) -> str:
+    """将 DirEntry 列表序列化为 JSON 字符串。"""
+    return json.dumps(entries, ensure_ascii=False)

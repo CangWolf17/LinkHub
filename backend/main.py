@@ -4,7 +4,6 @@ LinkHub - Local Smart Dashboard
 服务强制绑定 127.0.0.1，仅供本机浏览器访问。
 """
 
-import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -13,7 +12,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
-from app.core.config import APP_HOST, APP_PORT, DEFAULT_ALLOWED_DIRS
+from app.core.config import (
+    APP_HOST,
+    APP_PORT,
+    DEFAULT_ALLOWED_DIRS,
+    serialize_allowed_dirs,
+)
 from app.core.crypto import encrypt_value, is_encrypted
 from app.core.database import async_session_factory, engine
 from app.core.vector_store import get_chroma_client, shutdown_chroma
@@ -42,7 +46,7 @@ logger = logging.getLogger("linkhub")
 async def _seed_default_settings():
     """向 system_settings 插入默认配置（仅当 key 不存在时）。"""
     defaults = {
-        "allowed_dirs": json.dumps(DEFAULT_ALLOWED_DIRS, ensure_ascii=False),
+        "allowed_dirs": serialize_allowed_dirs(DEFAULT_ALLOWED_DIRS),
         "llm_base_url": "",
         "llm_api_key": "",
         "model_chat": "",

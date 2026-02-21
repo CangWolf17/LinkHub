@@ -4,7 +4,7 @@
     <h2 class="text-xl font-bold text-gray-900 mb-6">白名单目录</h2>
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
       <p class="text-sm text-gray-500 mb-4">
-        LinkHub 只在这些目录中扫描和管理软件与工作区。修改后点击保存即可生效。
+        LinkHub 只在这些目录中扫描和管理软件与工作区。每个目录需指定类型：软件仓（扫描为软件）或工作区（扫描为工作区）。
       </p>
 
       <div class="space-y-2 mb-3">
@@ -13,10 +13,17 @@
           :key="i"
           class="flex items-center gap-2"
         >
+          <select
+            v-model="allowedDirs[i].type"
+            class="w-24 shrink-0 px-2 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          >
+            <option value="software">软件仓</option>
+            <option value="workspace">工作区</option>
+          </select>
           <input
-            v-model="allowedDirs[i]"
+            v-model="allowedDirs[i].path"
             type="text"
-            placeholder="例: D:\GreenSoftwares"
+            :placeholder="allowedDirs[i].type === 'software' ? '例: C:\\MyPortableApps' : '例: C:\\Projects'"
             class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
@@ -50,12 +57,6 @@
           @click="saveAllowedDirs"
         >
           {{ savingDirs ? '保存中...' : '保存目录' }}
-        </button>
-        <button
-          class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-          @click="resetAllowedDirs"
-        >
-          重置为默认
         </button>
       </div>
 
@@ -154,7 +155,10 @@
     </div>
 
     <!-- 向量索引管理 -->
-    <h3 class="text-lg font-bold text-gray-900 mt-8 mb-4">向量索引管理</h3>
+    <h3 class="text-lg font-bold text-gray-900 mt-8 mb-2">向量索引管理</h3>
+    <p class="text-sm text-gray-500 mb-4">
+      向量索引用于语义搜索功能。当软件或工作区记录变更后，索引可能与数据库不同步。点击「重建全部索引」会清空现有索引并根据当前数据库记录重新生成，不会影响软件和工作区的原始数据。
+    </p>
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
       <div class="flex items-center gap-6 mb-4">
         <div class="text-sm">
@@ -255,34 +259,34 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { getLlmConfig, updateLlmConfig, testLlmConnection, getIndexStats, reindexAll, scanAndImportSoftware, scanAndImportWorkspaces, getAllowedDirs, updateAllowedDirs } from '@/api'
-import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse } from '@/api'
+import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse, DirEntry } from '@/api'
 
 // ── 白名单目录管理 ─────────────────────────────────────
-const allowedDirs = ref<string[]>([''])
+const allowedDirs = ref<DirEntry[]>([{ path: '', type: 'software' }])
 const savingDirs = ref(false)
 const dirsError = ref('')
 const dirsSuccess = ref('')
 
-const DEFAULT_DIRS = ['D:\\GreenSoftwares', 'F:\\WorkSpace']
-
 async function loadAllowedDirs() {
   try {
     const { data } = await getAllowedDirs()
-    allowedDirs.value = data.allowed_dirs.length ? data.allowed_dirs : ['']
+    allowedDirs.value = data.allowed_dirs.length ? data.allowed_dirs : [{ path: '', type: 'software' }]
   } catch { /* ignore */ }
 }
 
 function addAllowedDir() {
-  allowedDirs.value.push('')
+  allowedDirs.value.push({ path: '', type: 'software' })
 }
 
 function removeAllowedDir(i: number) {
   allowedDirs.value.splice(i, 1)
-  if (allowedDirs.value.length === 0) allowedDirs.value.push('')
+  if (allowedDirs.value.length === 0) allowedDirs.value.push({ path: '', type: 'software' })
 }
 
 async function saveAllowedDirs() {
-  const cleaned = allowedDirs.value.map(d => d.trim()).filter(Boolean)
+  const cleaned = allowedDirs.value
+    .map(d => ({ path: d.path.trim(), type: d.type }))
+    .filter(d => d.path)
   if (cleaned.length === 0) {
     dirsError.value = '请至少填写一个工作目录'
     return
@@ -297,22 +301,6 @@ async function saveAllowedDirs() {
     setTimeout(() => { dirsSuccess.value = '' }, 3000)
   } catch {
     dirsError.value = '保存失败，请重试'
-  } finally {
-    savingDirs.value = false
-  }
-}
-
-async function resetAllowedDirs() {
-  dirsError.value = ''
-  dirsSuccess.value = ''
-  savingDirs.value = true
-  try {
-    await updateAllowedDirs(DEFAULT_DIRS)
-    allowedDirs.value = [...DEFAULT_DIRS]
-    dirsSuccess.value = '已重置为默认目录'
-    setTimeout(() => { dirsSuccess.value = '' }, 3000)
-  } catch {
-    dirsError.value = '重置失败，请重试'
   } finally {
     savingDirs.value = false
   }

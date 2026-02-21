@@ -12,7 +12,6 @@
 Pipeline: 接收文件 → 解压 → 启发式寻址 → LLM 描述 → 入库 → 返回结果
 """
 
-import json
 import logging
 import os
 import shutil
@@ -25,8 +24,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import (
     ALLOWED_EXECUTABLE_SUFFIXES,
-    DEFAULT_ALLOWED_DIRS,
+    DIR_TYPE_SOFTWARE,
     EXE_PRIORITY_KEYWORDS,
+    filter_dirs_by_type,
+    parse_allowed_dirs,
 )
 from app.core.crypto import decrypt_value
 from app.core.database import get_db
@@ -44,7 +45,7 @@ router = APIRouter(prefix="/api/installer", tags=["Auto-Installer"])
 async def _get_install_base_dir(db: AsyncSession) -> Path:
     """
     获取软件安装基础目录。
-    优先使用 system_settings 中 allowed_dirs 的第一个目录。
+    优先使用 system_settings 中 allowed_dirs 中第一个 type=software 的目录。
     """
     result = await db.execute(
         select(SystemSetting.value).where(SystemSetting.key == "allowed_dirs")
@@ -52,14 +53,15 @@ async def _get_install_base_dir(db: AsyncSession) -> Path:
     row = result.scalar_one_or_none()
 
     if row:
-        try:
-            dirs = json.loads(row)
-            if isinstance(dirs, list) and dirs:
-                return Path(dirs[0])
-        except (json.JSONDecodeError, TypeError):
-            pass
+        entries = parse_allowed_dirs(row)
+        software_dirs = filter_dirs_by_type(entries, DIR_TYPE_SOFTWARE)
+        if software_dirs:
+            return software_dirs[0]
 
-    return Path(DEFAULT_ALLOWED_DIRS[0])
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="未配置软件仓目录，请先在设置中添加类型为「软件仓」的目录",
+    )
 
 
 def _extract_zip(archive_path: Path, target_dir: Path) -> None:
@@ -397,30 +399,33 @@ async def scan_and_import(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    遍历 system_settings 中 allowed_dirs 配置的所有白名单目录。
+    遍历 system_settings 中 allowed_dirs 配置的所有软件仓目录（type=software）。
     将每个一级子目录视为一个独立软件，使用启发式算法寻找主可执行文件并写入数据库。
 
     规则:
+      - 仅扫描 type=software 的目录
       - 仅处理直接子目录（不递归跨目录）
       - 若 executable_path 已存在于数据库，跳过（去重）
       - LLM 描述生成为非阻塞可选步骤
       - 同时更新 ChromaDB 向量索引
     """
-    # 读取白名单目录列表
+    # 读取白名单目录列表，仅取 type=software
     result = await db.execute(
         select(SystemSetting).where(SystemSetting.key == "allowed_dirs")
     )
     setting = result.scalar_one_or_none()
-    scan_dirs: list[Path] = []
-    if setting and setting.value:
-        try:
-            raw = json.loads(setting.value)
-            if isinstance(raw, list):
-                scan_dirs = [Path(d) for d in raw if d]
-        except (json.JSONDecodeError, TypeError):
-            pass
+    entries = parse_allowed_dirs(setting.value if setting else "")
+    scan_dirs = filter_dirs_by_type(entries, DIR_TYPE_SOFTWARE)
+
     if not scan_dirs:
-        scan_dirs = [Path(d) for d in DEFAULT_ALLOWED_DIRS]
+        return ScanDirsResponse(
+            success=True,
+            imported=0,
+            skipped=0,
+            failed=0,
+            details=[],
+            message="未配置软件仓目录（type=software），请先在设置中配置",
+        )
 
     # 读取数据库中已有的所有 executable_path，用于去重
     existing_result = await db.execute(select(PortableSoftware.executable_path))

@@ -46,13 +46,68 @@
           </div>
         </div>
 
-        <!-- 描述 -->
-        <p
-          v-if="software.description"
-          class="text-xs text-gray-500 mb-3 line-clamp-2"
-        >
-          {{ software.description }}
-        </p>
+        <!-- 描述区域 -->
+        <div class="mb-3">
+          <!-- 编辑模式 -->
+          <div v-if="isEditing" class="space-y-2">
+            <textarea
+              ref="editTextarea"
+              v-model="editDescription"
+              class="w-full text-xs text-gray-700 border border-gray-300 rounded-lg p-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+              rows="3"
+              placeholder="输入软件描述..."
+            />
+            <div class="flex items-center gap-1.5 justify-end">
+              <button
+                class="px-2 py-1 text-[11px] text-gray-500 hover:text-gray-700 rounded transition-colors"
+                @click="cancelEdit"
+              >
+                取消
+              </button>
+              <button
+                class="px-2 py-1 text-[11px] text-white bg-blue-500 hover:bg-blue-600 rounded transition-colors"
+                @click="saveEdit"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+
+          <!-- 显示模式 -->
+          <div v-else>
+            <p
+              v-if="software.description"
+              class="text-xs text-gray-500 line-clamp-2"
+            >
+              {{ software.description }}
+            </p>
+            <p v-else class="text-xs text-gray-300 italic">暂无描述</p>
+
+            <!-- 描述操作按钮 -->
+            <div class="flex items-center gap-1 mt-1.5">
+              <button
+                class="p-1 text-gray-300 hover:text-purple-500 hover:bg-purple-50 rounded transition-colors"
+                :class="generating ? 'animate-pulse text-purple-400' : ''"
+                :title="generating ? '生成中...' : 'AI 生成描述'"
+                :disabled="generating"
+                @click="handleGenerate"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                </svg>
+              </button>
+              <button
+                class="p-1 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors"
+                title="编辑描述"
+                @click="startEdit"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
 
         <!-- 路径 -->
         <div class="text-[11px] text-gray-400 font-mono truncate" :title="software.executable_path">
@@ -82,17 +137,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import type { Software } from '@/api'
+import { generateSoftwareDescription, updateSoftware } from '@/api'
 
 const props = defineProps<{
   software: Software
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   launch: [path: string]
   delete: [id: string]
+  updated: [software: Software]
 }>()
+
+// 描述编辑状态
+const isEditing = ref(false)
+const editDescription = ref('')
+const editTextarea = ref<HTMLTextAreaElement | null>(null)
+
+// LLM 生成状态
+const generating = ref(false)
 
 const parsedTags = computed(() => {
   if (!props.software.tags) return []
@@ -103,4 +168,45 @@ const parsedTags = computed(() => {
     return []
   }
 })
+
+function startEdit() {
+  editDescription.value = props.software.description || ''
+  isEditing.value = true
+  nextTick(() => editTextarea.value?.focus())
+}
+
+function cancelEdit() {
+  isEditing.value = false
+  editDescription.value = ''
+}
+
+async function saveEdit() {
+  try {
+    const { data } = await updateSoftware(props.software.id, {
+      description: editDescription.value || null,
+    })
+    emit('updated', data)
+    isEditing.value = false
+  } catch {
+    alert('保存失败，请重试')
+  }
+}
+
+async function handleGenerate() {
+  if (generating.value) return
+  generating.value = true
+  try {
+    const { data } = await generateSoftwareDescription(props.software.id)
+    if (data.success) {
+      emit('updated', { ...props.software, description: data.description })
+    } else {
+      alert(data.message || '生成失败')
+    }
+  } catch (e: unknown) {
+    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '生成失败，请检查 LLM 配置'
+    alert(detail)
+  } finally {
+    generating.value = false
+  }
+}
 </script>

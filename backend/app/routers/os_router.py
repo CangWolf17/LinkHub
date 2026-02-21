@@ -8,7 +8,6 @@
   4. 非阻塞执行 — subprocess.Popen + DETACHED_PROCESS，绝不阻塞主线程
 """
 
-import json
 import logging
 import os
 import subprocess
@@ -19,7 +18,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import ALLOWED_EXECUTABLE_SUFFIXES, DEFAULT_ALLOWED_DIRS
+from app.core.config import (
+    ALLOWED_EXECUTABLE_SUFFIXES,
+    all_dir_paths,
+    parse_allowed_dirs,
+)
 from app.core.database import get_db
 from app.models.models import SystemSetting
 from app.schemas.os_schemas import OSActionResponse, OSTargetRequest
@@ -35,7 +38,7 @@ router = APIRouter(prefix="/api/os", tags=["OS Bridge"])
 async def _get_allowed_dirs(db: AsyncSession) -> list[Path]:
     """
     从 system_settings 表动态读取白名单目录。
-    若数据库中无配置，则回退到 config.py 中的默认值。
+    返回所有类型的目录（software + workspace），用于路径安全校验。
     """
     result = await db.execute(
         select(SystemSetting.value).where(SystemSetting.key == "allowed_dirs")
@@ -43,14 +46,11 @@ async def _get_allowed_dirs(db: AsyncSession) -> list[Path]:
     row = result.scalar_one_or_none()
 
     if row:
-        try:
-            dirs = json.loads(row)
-            if isinstance(dirs, list) and dirs:
-                return [Path(d).resolve() for d in dirs]
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("system_settings 中 allowed_dirs 格式异常，回退到默认值")
+        entries = parse_allowed_dirs(row)
+        if entries:
+            return [p.resolve() for p in all_dir_paths(entries)]
 
-    return [Path(d).resolve() for d in DEFAULT_ALLOWED_DIRS]
+    return []
 
 
 def _validate_path_within_whitelist(target: Path, allowed_dirs: list[Path]) -> bool:

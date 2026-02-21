@@ -4,6 +4,14 @@
       <h2 class="text-xl font-bold text-gray-900">软件舱</h2>
       <div class="flex items-center gap-2">
         <button
+          v-if="itemsWithoutDescription.length > 0"
+          class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50"
+          :disabled="bulkGenerating"
+          @click="bulkGenerate"
+        >
+          {{ bulkGenerating ? `生成中 (${bulkProgress}/${bulkTotal})` : `AI 批量生成描述 (${itemsWithoutDescription.length})` }}
+        </button>
+        <button
           class="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
           @click="cleanupDead"
         >
@@ -57,14 +65,15 @@
         :software="sw"
         @launch="handleLaunch"
         @delete="handleDelete"
+        @updated="handleUpdated"
       />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { getSoftwareList, uploadInstall, deleteSoftware, launchApp, cleanupDeadSoftware } from '@/api'
+import { ref, computed, onMounted } from 'vue'
+import { getSoftwareList, uploadInstall, deleteSoftware, launchApp, cleanupDeadSoftware, generateSoftwareDescription } from '@/api'
 import type { Software } from '@/api'
 import SoftwareCard from '@/components/SoftwareCard.vue'
 
@@ -76,6 +85,15 @@ const uploadStage = ref('')
 const uploadProgress = ref(0)
 const uploadMessage = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+
+// 批量生成状态
+const bulkGenerating = ref(false)
+const bulkProgress = ref(0)
+const bulkTotal = ref(0)
+
+const itemsWithoutDescription = computed(() =>
+  items.value.filter((s) => !s.description && !s.is_missing)
+)
 
 async function loadList() {
   loading.value = true
@@ -155,6 +173,13 @@ async function handleDelete(id: string) {
   } catch { /* ignore */ }
 }
 
+function handleUpdated(updated: Software) {
+  const idx = items.value.findIndex((s) => s.id === updated.id)
+  if (idx !== -1) {
+    items.value[idx] = { ...items.value[idx], ...updated }
+  }
+}
+
 async function cleanupDead() {
   if (!confirm('将删除所有路径失效的软件记录，确定?')) return
   try {
@@ -162,6 +187,37 @@ async function cleanupDead() {
     alert(`已清理 ${data.removed_count} 条死链记录`)
     await loadList()
   } catch { /* ignore */ }
+}
+
+async function bulkGenerate() {
+  const targets = itemsWithoutDescription.value
+  if (targets.length === 0) return
+  if (!confirm(`将为 ${targets.length} 个无描述的软件生成 AI 描述，确定?`)) return
+
+  bulkGenerating.value = true
+  bulkTotal.value = targets.length
+  bulkProgress.value = 0
+
+  let successCount = 0
+  let failCount = 0
+
+  for (const sw of targets) {
+    try {
+      const { data } = await generateSoftwareDescription(sw.id)
+      if (data.success) {
+        handleUpdated({ ...sw, description: data.description })
+        successCount++
+      } else {
+        failCount++
+      }
+    } catch {
+      failCount++
+    }
+    bulkProgress.value++
+  }
+
+  bulkGenerating.value = false
+  alert(`批量生成完成：成功 ${successCount} 个，失败 ${failCount} 个`)
 }
 
 onMounted(loadList)

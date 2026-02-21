@@ -54,6 +54,11 @@ export interface SearchResponse {
   query: string
 }
 
+export interface DirEntry {
+  path: string
+  type: 'software' | 'workspace'
+}
+
 export interface InstallerUploadResponse {
   success: boolean
   software_id: string
@@ -96,16 +101,15 @@ export const getHealth = () => http.get<{ status: string }>('/health')
 export const getInitStatus = () =>
   http.get<{
     needs_setup: boolean
-    allowed_dirs: string[]
+    allowed_dirs: DirEntry[]
     llm_configured: boolean
-    dirs_are_default: boolean
   }>('/system/init-status')
 
 export const getAllowedDirs = () =>
-  http.get<{ allowed_dirs: string[] }>('/system/allowed-dirs')
+  http.get<{ allowed_dirs: DirEntry[] }>('/system/allowed-dirs')
 
-export const updateAllowedDirs = (dirs: string[]) =>
-  http.put<{ allowed_dirs: string[] }>('/system/allowed-dirs', { allowed_dirs: dirs })
+export const updateAllowedDirs = (dirs: DirEntry[]) =>
+  http.put<{ allowed_dirs: DirEntry[] }>('/system/allowed-dirs', { allowed_dirs: dirs })
 
 // ── Software (Module B) ─────────────────────────────────
 
@@ -127,6 +131,12 @@ export const deleteSoftware = (id: string) =>
 export const cleanupDeadSoftware = () =>
   http.delete<{ removed_count: number }>('/metadata/software/cleanup/dead-links')
 
+export const generateSoftwareDescription = (id: string, customPrompt?: string) =>
+  http.post<{ success: boolean; description: string; model: string; message: string }>(
+    `/metadata/software/${id}/generate-description`,
+    customPrompt ? { custom_prompt: customPrompt } : {}
+  )
+
 // ── Workspaces (Module B) ────────────────────────────────
 
 export const getWorkspaceList = (params?: { search?: string; status?: string }) =>
@@ -146,6 +156,12 @@ export const deleteWorkspace = (id: string) =>
 
 export const cleanupDeadWorkspaces = () =>
   http.delete<{ removed_count: number }>('/metadata/workspaces/cleanup/dead-links')
+
+export const generateWorkspaceDescription = (id: string, customPrompt?: string) =>
+  http.post<{ success: boolean; description: string; model: string; message: string }>(
+    `/metadata/workspaces/${id}/generate-description`,
+    customPrompt ? { custom_prompt: customPrompt } : {}
+  )
 
 // ── LLM Gateway (Module C) ──────────────────────────────
 

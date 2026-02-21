@@ -24,14 +24,28 @@
           <input
             v-model="form.directory_path"
             type="text"
-            placeholder="例: F:\WorkSpace\MyProject"
+            placeholder="例: C:\Projects\MyProject"
             class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
           />
         </div>
 
         <!-- 描述 -->
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">描述</label>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-sm font-medium text-gray-700">描述</label>
+            <button
+              v-if="isEdit && workspace"
+              class="flex items-center gap-1 px-2 py-0.5 text-[11px] text-purple-600 hover:bg-purple-50 rounded transition-colors disabled:opacity-50"
+              :disabled="generatingDesc"
+              :title="generatingDesc ? '生成中...' : 'AI 生成描述'"
+              @click="handleGenerateDescription"
+            >
+              <svg class="w-3.5 h-3.5" :class="generatingDesc ? 'animate-pulse' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+              </svg>
+              {{ generatingDesc ? '生成中...' : 'AI 生成' }}
+            </button>
+          </div>
           <textarea
             v-model="form.description"
             rows="2"
@@ -57,9 +71,10 @@
             v-model="form.status"
             class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
+            <option value="not_started">未开始</option>
             <option value="active">进行中</option>
-            <option value="archived">已归档</option>
             <option value="completed">已完成</option>
+            <option value="archived">已归档</option>
           </select>
         </div>
       </div>
@@ -89,7 +104,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { createWorkspace, updateWorkspace } from '@/api'
+import { createWorkspace, updateWorkspace, generateWorkspaceDescription } from '@/api'
 import type { Workspace } from '@/api'
 
 const props = defineProps<{
@@ -113,6 +128,7 @@ const form = reactive({
 
 const saving = ref(false)
 const error = ref('')
+const generatingDesc = ref(false)
 
 onMounted(() => {
   if (props.workspace) {
@@ -125,6 +141,25 @@ onMounted(() => {
     form.status = props.workspace.status
   }
 })
+
+async function handleGenerateDescription() {
+  if (!props.workspace || generatingDesc.value) return
+  generatingDesc.value = true
+  error.value = ''
+  try {
+    const { data } = await generateWorkspaceDescription(props.workspace.id)
+    if (data.success) {
+      form.description = data.description
+    } else {
+      error.value = data.message || '描述生成失败'
+    }
+  } catch (e: unknown) {
+    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '生成失败，请检查 LLM 配置'
+    error.value = typeof detail === 'string' ? detail : JSON.stringify(detail)
+  } finally {
+    generatingDesc.value = false
+  }
+}
 
 async function save() {
   error.value = ''

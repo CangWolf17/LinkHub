@@ -9,9 +9,10 @@
           @change="loadList"
         >
           <option value="">全部状态</option>
+          <option value="not_started">未开始</option>
           <option value="active">进行中</option>
-          <option value="archived">已归档</option>
           <option value="completed">已完成</option>
+          <option value="archived">已归档</option>
         </select>
         <button
           class="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"

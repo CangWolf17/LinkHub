@@ -53,10 +53,17 @@
               :key="i"
               class="flex items-center gap-2"
             >
+              <select
+                v-model="dirs[i].type"
+                class="w-24 shrink-0 px-2 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="software">软件仓</option>
+                <option value="workspace">工作区</option>
+              </select>
               <input
-                v-model="dirs[i]"
+                v-model="dirs[i].path"
                 type="text"
-                placeholder="例: D:\GreenSoftwares"
+                :placeholder="dirs[i].type === 'software' ? '例: C:\\MyPortableApps' : '例: C:\\Projects'"
                 class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button
@@ -267,6 +274,7 @@ import {
   scanAndImportSoftware,
   scanAndImportWorkspaces,
 } from '@/api'
+import type { DirEntry } from '@/api'
 
 const emit = defineEmits<{ (e: 'done'): void }>()
 
@@ -275,21 +283,23 @@ const totalSteps = 3
 const step = ref(1)
 
 // ── Step 1 state ─────────────────────────────
-const dirs = ref<string[]>([''])
+const dirs = ref<DirEntry[]>([{ path: '', type: 'software' }])
 const saving = ref(false)
 const step1Error = ref('')
 
 function addDir() {
-  dirs.value.push('')
+  dirs.value.push({ path: '', type: 'software' })
 }
 
 function removeDir(i: number) {
   dirs.value.splice(i, 1)
-  if (dirs.value.length === 0) dirs.value.push('')
+  if (dirs.value.length === 0) dirs.value.push({ path: '', type: 'software' })
 }
 
 async function submitStep1() {
-  const cleaned = dirs.value.map(d => d.trim()).filter(Boolean)
+  const cleaned = dirs.value
+    .map(d => ({ path: d.path.trim(), type: d.type }))
+    .filter(d => d.path)
   if (cleaned.length === 0) {
     step1Error.value = '请至少填写一个工作目录'
     return

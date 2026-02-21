@@ -49,7 +49,7 @@ class Workspace(Base):
     deadline: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     status: Mapped[str] = mapped_column(
         String(50), default="active"
-    )  # active / archived / completed
+    )  # not_started / active / completed / archived
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()

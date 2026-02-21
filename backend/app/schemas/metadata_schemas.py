@@ -64,7 +64,9 @@ class WorkspaceCreate(BaseModel):
     directory_path: str = Field(..., description="工作区目录绝对路径")
     description: str | None = Field(None, description="项目备注")
     deadline: datetime | None = Field(None, description="截止日期")
-    status: str = Field("active", description="状态: active / archived / completed")
+    status: str = Field(
+        "active", description="状态: not_started / active / completed / archived"
+    )
 
 
 class WorkspaceUpdate(BaseModel):
@@ -107,4 +109,24 @@ class WorkspaceScanResponse(BaseModel):
     imported: int = Field(0, description="本次新导入的工作区数量")
     skipped: int = Field(0, description="已存在跳过的数量")
     details: list[dict] = Field(default_factory=list)
+    message: str = ""
+
+
+# ── LLM 描述生成 Schemas ─────────────────────────────────
+
+
+class GenerateDescriptionRequest(BaseModel):
+    """LLM 描述生成请求（可选自定义提示词）"""
+
+    custom_prompt: str | None = Field(
+        None, description="用户自定义提示词，为空则使用默认 prompt"
+    )
+
+
+class GenerateDescriptionResponse(BaseModel):
+    """LLM 描述生成响应"""
+
+    success: bool
+    description: str = Field("", description="生成的描述文本")
+    model: str = Field("", description="使用的模型")
     message: str = ""

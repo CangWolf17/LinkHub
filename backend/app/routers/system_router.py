@@ -6,23 +6,37 @@
   - 提供 allowed_dirs 的读写管理
 """
 
-import json
 import logging
+from typing import Union
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import DEFAULT_ALLOWED_DIRS
+from app.core.config import (
+    DEFAULT_ALLOWED_DIRS,
+    VALID_DIR_TYPES,
+    DirEntry,
+    parse_allowed_dirs,
+    serialize_allowed_dirs,
+)
 from app.core.database import get_db
 from app.models.models import SystemSetting
+
+
+class UpdateAllowedDirsRequest(BaseModel):
+    """更新白名单目录请求体，兼容新旧格式。"""
+
+    allowed_dirs: list[Union[dict, str]] = Field(
+        default_factory=list,
+        description='目录列表，支持 [{"path": "...", "type": "software"}] 或 ["path1", "path2"]',
+    )
+
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/system", tags=["System"])
-
-# 判断"未初始化"时的哨兵：allowed_dirs 仍是默认占位值且 llm_base_url 为空
-_DEFAULT_DIRS_SET = set(DEFAULT_ALLOWED_DIRS)
 
 
 @router.get(
@@ -35,7 +49,6 @@ async def get_init_status(db: AsyncSession = Depends(get_db)):
 
     未初始化的判定条件（满足任意一条）:
       - allowed_dirs 为空列表
-      - allowed_dirs 仍等于启动时写入的默认占位目录（未被用户修改过）
       - llm_base_url 为空
 
     前端据此决定是否弹出设置向导。
@@ -44,30 +57,19 @@ async def get_init_status(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(keys)))
     settings = {row.key: row.value for row in result.scalars().all()}
 
-    # 解析 allowed_dirs
-    dirs: list[str] = []
-    raw_dirs = settings.get("allowed_dirs", "")
-    if raw_dirs:
-        try:
-            parsed = json.loads(raw_dirs)
-            if isinstance(parsed, list):
-                dirs = [d for d in parsed if d]
-        except (json.JSONDecodeError, TypeError):
-            pass
+    # 解析 allowed_dirs（兼容新旧格式）
+    entries = parse_allowed_dirs(settings.get("allowed_dirs", ""))
 
     llm_base_url = settings.get("llm_base_url", "").strip()
-
-    dirs_are_default = set(dirs) == _DEFAULT_DIRS_SET
-    dirs_empty = len(dirs) == 0
+    dirs_empty = len(entries) == 0
     llm_not_configured = not llm_base_url
 
-    needs_setup = dirs_empty or dirs_are_default or llm_not_configured
+    needs_setup = dirs_empty or llm_not_configured
 
     return {
         "needs_setup": needs_setup,
-        "allowed_dirs": dirs,
+        "allowed_dirs": entries,
         "llm_configured": not llm_not_configured,
-        "dirs_are_default": dirs_are_default,
     }
 
 
@@ -76,20 +78,13 @@ async def get_init_status(db: AsyncSession = Depends(get_db)):
     summary="获取当前白名单目录列表",
 )
 async def get_allowed_dirs(db: AsyncSession = Depends(get_db)):
-    """返回当前配置的 allowed_dirs 列表。"""
+    """返回当前配置的 allowed_dirs 列表（含类型信息）。"""
     result = await db.execute(
         select(SystemSetting).where(SystemSetting.key == "allowed_dirs")
     )
     setting = result.scalar_one_or_none()
-    dirs: list[str] = []
-    if setting and setting.value:
-        try:
-            parsed = json.loads(setting.value)
-            if isinstance(parsed, list):
-                dirs = [d for d in parsed if d]
-        except (json.JSONDecodeError, TypeError):
-            pass
-    return {"allowed_dirs": dirs}
+    entries = parse_allowed_dirs(setting.value if setting else "")
+    return {"allowed_dirs": entries}
 
 
 @router.put(
@@ -97,24 +92,34 @@ async def get_allowed_dirs(db: AsyncSession = Depends(get_db)):
     summary="更新白名单目录列表",
 )
 async def update_allowed_dirs(
-    payload: dict,
+    payload: UpdateAllowedDirsRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """
     更新 allowed_dirs 配置。
-    请求体: { "allowed_dirs": ["C:/path1", "D:/path2"] }
+    请求体: { "allowed_dirs": [{"path": "C:/path1", "type": "software"}, ...] }
+    也兼容旧格式: { "allowed_dirs": ["C:/path1", "D:/path2"] }
     """
-    dirs = payload.get("allowed_dirs", [])
-    if not isinstance(dirs, list):
-        dirs = []
-    # 过滤空字符串
-    dirs = [str(d).strip() for d in dirs if str(d).strip()]
+    raw_dirs = payload.allowed_dirs
+
+    # 规范化为 DirEntry 列表
+    entries: list[DirEntry] = []
+    for item in raw_dirs:
+        if isinstance(item, dict):
+            p = str(item.get("path", "")).strip()
+            t = str(item.get("type", "software")).strip()
+            if p and t in VALID_DIR_TYPES:
+                entries.append(DirEntry(path=p, type=t))
+        elif isinstance(item, str):
+            p = item.strip()
+            if p:
+                entries.append(DirEntry(path=p, type="software"))
 
     result = await db.execute(
         select(SystemSetting).where(SystemSetting.key == "allowed_dirs")
     )
     setting = result.scalar_one_or_none()
-    new_value = json.dumps(dirs, ensure_ascii=False)
+    new_value = serialize_allowed_dirs(entries)
 
     if setting:
         setting.value = new_value
@@ -123,5 +128,5 @@ async def update_allowed_dirs(
 
     await db.flush()
     await db.commit()
-    logger.info("allowed_dirs 已更新: %s", dirs)
-    return {"allowed_dirs": dirs}
+    logger.info("allowed_dirs 已更新: %s", entries)
+    return {"allowed_dirs": entries}

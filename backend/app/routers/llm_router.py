@@ -15,8 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.crypto import decrypt_value, encrypt_value, is_encrypted
+from app.core.crypto import encrypt_value
 from app.core.database import get_db
+from app.core.llm_helpers import get_openai_client, load_llm_config
 from app.models.models import SystemSetting
 from app.schemas.llm_schemas import (
     ChatRequest,
@@ -35,52 +36,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/llm", tags=["LLM Gateway"])
 
 
-# ── 内部工具函数 ─────────────────────────────────────────
-
-
-async def _load_llm_config(db: AsyncSession) -> dict[str, str]:
-    """从 system_settings 表动态加载 LLM 相关配置，自动解密 llm_api_key。"""
-    keys = ["llm_base_url", "llm_api_key", "model_chat", "model_embedding"]
-    result = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(keys)))
-    settings = {row.key: row.value for row in result.scalars().all()}
-
-    # 解密 API key（支持明文向后兼容）
-    if "llm_api_key" in settings and settings["llm_api_key"]:
-        settings["llm_api_key"] = decrypt_value(settings["llm_api_key"])
-
-    return settings
-
-
-def _get_openai_client(config: dict[str, str]):
-    """
-    根据配置动态创建 OpenAI 兼容 Client。
-    使用延迟导入以避免未安装 openai 时的启动错误。
-    """
-    try:
-        from openai import OpenAI
-    except ImportError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="openai 库未安装，请执行: pip install openai",
-        )
-
-    base_url = config.get("llm_base_url", "").strip()
-    api_key = config.get("llm_api_key", "").strip()
-
-    if not base_url:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM 未配置: llm_base_url 为空。请先在设置中配置 LLM 连接信息。",
-        )
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM 未配置: llm_api_key 为空。请先在设置中配置 API 密钥。",
-        )
-
-    return OpenAI(base_url=base_url, api_key=api_key)
-
-
 # ── LLM 配置管理端点 ────────────────────────────────────
 
 
@@ -93,7 +48,7 @@ async def get_llm_config(
     db: AsyncSession = Depends(get_db),
 ):
     """返回 LLM 配置状态，API Key 仅返回是否已设置。"""
-    config = await _load_llm_config(db)
+    config = await load_llm_config(db)
     return LLMConfigResponse(
         llm_base_url=config.get("llm_base_url", ""),
         has_api_key=bool(config.get("llm_api_key", "").strip()),
@@ -131,7 +86,7 @@ async def update_llm_config(
     logger.info("LLM 配置已更新: %s", list(update_map.keys()))
 
     # 返回更新后的配置
-    config = await _load_llm_config(db)
+    config = await load_llm_config(db)
     return LLMConfigResponse(
         llm_base_url=config.get("llm_base_url", ""),
         has_api_key=bool(config.get("llm_api_key", "").strip()),
@@ -148,10 +103,10 @@ async def test_llm_connection(
     db: AsyncSession = Depends(get_db),
 ):
     """使用当前配置测试 LLM 连接是否可用。"""
-    config = await _load_llm_config(db)
+    config = await load_llm_config(db)
 
     try:
-        client = _get_openai_client(config)
+        client = get_openai_client(config)
     except HTTPException:
         raise
 
@@ -201,8 +156,8 @@ async def chat(
     调用 Chat 模型进行多轮对话。
     使用 system_settings 中的 model_chat 配置。
     """
-    config = await _load_llm_config(db)
-    client = _get_openai_client(config)
+    config = await load_llm_config(db)
+    client = get_openai_client(config)
 
     model = config.get("model_chat", "").strip()
     if not model:
@@ -275,8 +230,8 @@ async def embed(
     调用 Embedding 模型将文本转为向量。
     使用 system_settings 中的 model_embedding 配置。
     """
-    config = await _load_llm_config(db)
-    client = _get_openai_client(config)
+    config = await load_llm_config(db)
+    client = get_openai_client(config)
 
     model = config.get("model_embedding", "").strip()
     if not model:
@@ -330,8 +285,8 @@ async def extract(
     使用 Chat 模型从文本中提取结构化信息。
     通过 system prompt 引导模型返回 JSON 格式输出。
     """
-    config = await _load_llm_config(db)
-    client = _get_openai_client(config)
+    config = await load_llm_config(db)
+    client = get_openai_client(config)
 
     model = config.get("model_chat", "").strip()
     if not model:

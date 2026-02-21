@@ -108,6 +108,7 @@ defineEmits<{
 const statusIcon = computed(() => {
   if (props.workspace.is_missing) return '⚠️'
   switch (props.workspace.status) {
+    case 'not_started': return '⏳'
     case 'active': return '🟢'
     case 'completed': return '✅'
     case 'archived': return '📁'
@@ -117,6 +118,7 @@ const statusIcon = computed(() => {
 
 const statusLabel = computed(() => {
   switch (props.workspace.status) {
+    case 'not_started': return '未开始'
     case 'active': return '进行中'
     case 'completed': return '已完成'
     case 'archived': return '已归档'
@@ -126,6 +128,7 @@ const statusLabel = computed(() => {
 
 const statusBadgeClass = computed(() => {
   switch (props.workspace.status) {
+    case 'not_started': return 'bg-yellow-50 text-yellow-700'
     case 'active': return 'bg-green-50 text-green-700'
     case 'completed': return 'bg-blue-50 text-blue-700'
     case 'archived': return 'bg-gray-100 text-gray-600'
