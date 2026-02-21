@@ -75,3 +75,11 @@ credentials.json
 backend/app/data/
 backend/*.log
 backend/uploads/
+
+# Internal dev / AI Agent files
+TASK.md
+INIT.md
+GEMINI.md
+AGENTS.md
+main.md
+recycle_file.ps1
