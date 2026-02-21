@@ -1,16 +1,14 @@
 @echo off
 title LinkHub
 
-set ROOT=%~dp0
-
 echo [1/3] Starting backend on port 8147...
-start "LinkHub-Backend" cmd /k "pushd %ROOT%backend ^&^& D:\Miniconda\python.exe main.py"
+start "LinkHub-Backend" cmd /k "%~dp0backend\run.bat"
 
 echo [2/3] Waiting for backend to be ready...
 timeout /t 3 /nobreak >nul
 
 echo [3/3] Starting frontend on port 5173...
-start "LinkHub-Frontend" cmd /k "pushd %ROOT%frontend ^&^& npm run dev"
+start "LinkHub-Frontend" cmd /k "%~dp0frontend\run.bat"
 
 timeout /t 3 /nobreak >nul
 
