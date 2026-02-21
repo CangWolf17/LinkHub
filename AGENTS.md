@@ -37,7 +37,9 @@ For tasks involving **>3 steps** or modifying **multiple files**, agents **MUST*
 ```
 
 ## 🛠 Tech Stack & Style
-- **Runtime:** Node.js / Python
+- **Runtime:** Node.js (Frontend Vue 3) / Python 3.10+ (Backend FastAPI)
+- **Database:** SQLite (WAL mode enforced) / ChromaDB
 - **Python Path:** D:\Miniconda\python.exe
+- **Network Constraint:** All backend services must bind to `127.0.0.1`.
 - **Encoding:** Always handle files as UTF-8.
 - **Style:** Adhere to project `.editorconfig` or `.prettierrc`.

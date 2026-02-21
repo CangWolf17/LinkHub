@@ -1,10 +1,10 @@
-# Task: Initialize LinkHub Project
+# Task: Phase 1 - 核心底层跑通 (基础环境 & 模块 A)
 ## 🎯 Objective
-Create standardized configuration files for the AI Agent development environment.
+搭建后端 FastAPI 基础结构、SQLite 数据库 (开启 WAL 模式)，并实现安全的操作系统底层拉起模块 (OS Bridge)。
 
 ## 📋 Execution Plan
-- [x] Step 1: Analyze directory structure and INIT.md.
-- [x] Step 2: Discover User Context (Name, Language, Python Path).
-- [x] Step 3: Generate GEMINI.md from template.
-- [x] Step 4: Generate AGENTS.md from template.
-- [x] Step 5: Verify files and provide start instructions.
+- [ ] Step 1: Initialize project directory structure (`backend/` & `frontend/`).
+- [ ] Step 2: Setup Python virtual environment or configure dependencies (`requirements.txt` for FastAPI, Uvicorn, SQLAlchemy).
+- [ ] Step 3: Implement SQLite Database Config & ORM Models (`portable_software`, `workspaces`, `system_settings`), ensuring `PRAGMA journal_mode=WAL;`.
+- [ ] Step 4: Implement Module A (`os_router.py`) with strict path whitelisting and non-blocking detached process launching (`creationflags=subprocess.DETACHED_PROCESS`).
+- [ ] Step 5: Test and verify Module A endpoints (`/api/os/launch`, `/api/os/open-dir`).
