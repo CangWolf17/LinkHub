@@ -1,5 +1,68 @@
 <template>
   <div class="max-w-2xl">
+    <!-- 白名单目录管理 -->
+    <h2 class="text-xl font-bold text-gray-900 mb-6">白名单目录</h2>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
+      <p class="text-sm text-gray-500 mb-4">
+        LinkHub 只在这些目录中扫描和管理软件与工作区。修改后点击保存即可生效。
+      </p>
+
+      <div class="space-y-2 mb-3">
+        <div
+          v-for="(_d, i) in allowedDirs"
+          :key="i"
+          class="flex items-center gap-2"
+        >
+          <input
+            v-model="allowedDirs[i]"
+            type="text"
+            placeholder="例: D:\GreenSoftwares"
+            class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="button"
+            class="p-2 text-gray-400 hover:text-red-500 transition-colors"
+            @click="removeAllowedDir(i)"
+            title="移除"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        class="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium mb-4"
+        @click="addAllowedDir"
+      >
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+        添加目录
+      </button>
+
+      <div class="flex items-center gap-3">
+        <button
+          class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          :disabled="savingDirs"
+          @click="saveAllowedDirs"
+        >
+          {{ savingDirs ? '保存中...' : '保存目录' }}
+        </button>
+        <button
+          class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+          @click="resetAllowedDirs"
+        >
+          重置为默认
+        </button>
+      </div>
+
+      <p v-if="dirsError" class="mt-3 text-xs text-red-600">{{ dirsError }}</p>
+      <p v-if="dirsSuccess" class="mt-3 text-xs text-green-600">{{ dirsSuccess }}</p>
+    </div>
+
     <h2 class="text-xl font-bold text-gray-900 mb-6">LLM 模型配置</h2>
 
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-5">
@@ -191,8 +254,71 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
-import { getLlmConfig, updateLlmConfig, testLlmConnection, getIndexStats, reindexAll, scanAndImportSoftware, scanAndImportWorkspaces } from '@/api'
+import { getLlmConfig, updateLlmConfig, testLlmConnection, getIndexStats, reindexAll, scanAndImportSoftware, scanAndImportWorkspaces, getAllowedDirs, updateAllowedDirs } from '@/api'
 import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse } from '@/api'
+
+// ── 白名单目录管理 ─────────────────────────────────────
+const allowedDirs = ref<string[]>([''])
+const savingDirs = ref(false)
+const dirsError = ref('')
+const dirsSuccess = ref('')
+
+const DEFAULT_DIRS = ['D:\\GreenSoftwares', 'F:\\WorkSpace']
+
+async function loadAllowedDirs() {
+  try {
+    const { data } = await getAllowedDirs()
+    allowedDirs.value = data.allowed_dirs.length ? data.allowed_dirs : ['']
+  } catch { /* ignore */ }
+}
+
+function addAllowedDir() {
+  allowedDirs.value.push('')
+}
+
+function removeAllowedDir(i: number) {
+  allowedDirs.value.splice(i, 1)
+  if (allowedDirs.value.length === 0) allowedDirs.value.push('')
+}
+
+async function saveAllowedDirs() {
+  const cleaned = allowedDirs.value.map(d => d.trim()).filter(Boolean)
+  if (cleaned.length === 0) {
+    dirsError.value = '请至少填写一个工作目录'
+    return
+  }
+  dirsError.value = ''
+  dirsSuccess.value = ''
+  savingDirs.value = true
+  try {
+    await updateAllowedDirs(cleaned)
+    allowedDirs.value = cleaned
+    dirsSuccess.value = '目录列表已保存'
+    setTimeout(() => { dirsSuccess.value = '' }, 3000)
+  } catch {
+    dirsError.value = '保存失败，请重试'
+  } finally {
+    savingDirs.value = false
+  }
+}
+
+async function resetAllowedDirs() {
+  dirsError.value = ''
+  dirsSuccess.value = ''
+  savingDirs.value = true
+  try {
+    await updateAllowedDirs(DEFAULT_DIRS)
+    allowedDirs.value = [...DEFAULT_DIRS]
+    dirsSuccess.value = '已重置为默认目录'
+    setTimeout(() => { dirsSuccess.value = '' }, 3000)
+  } catch {
+    dirsError.value = '重置失败，请重试'
+  } finally {
+    savingDirs.value = false
+  }
+}
+
+// ── LLM 配置 ──────────────────────────────────────────
 
 const currentConfig = ref<LlmConfig | null>(null)
 const form = reactive({
@@ -327,6 +453,7 @@ function showMsg(msg: string, type: 'success' | 'error') {
 }
 
 onMounted(() => {
+  loadAllowedDirs()
   loadConfig()
   loadStats()
 })

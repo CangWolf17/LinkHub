@@ -173,10 +173,10 @@ export const uploadInstall = (file: File) => {
 }
 
 export const scanAndImportSoftware = () =>
-  http.post<ScanDirsResponse>('/installer/scan-dirs')
+  http.post<ScanDirsResponse>('/installer/scan-dirs', null, { timeout: 300_000 })
 
 export const scanAndImportWorkspaces = () =>
-  http.post<WorkspaceScanResponse>('/metadata/workspaces/scan')
+  http.post<WorkspaceScanResponse>('/metadata/workspaces/scan', null, { timeout: 300_000 })
 
 // ── Search (ChromaDB) ───────────────────────────────────
 

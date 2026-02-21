@@ -169,10 +169,10 @@ async def _generate_description_via_llm(
             logger.info("LLM 未配置，跳过描述生成")
             return ""
 
-        from openai import OpenAI
+        from openai import AsyncOpenAI
 
-        client = OpenAI(base_url=base_url, api_key=api_key)
-        response = client.chat.completions.create(
+        client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        response = await client.chat.completions.create(
             model=model,
             messages=[
                 {
@@ -478,10 +478,8 @@ async def scan_and_import(
                     )
                     continue
 
-                # LLM 描述（非阻塞）
-                description = await _generate_description_via_llm(
-                    software_name, exe_path_str or str(subdir), db
-                )
+                # 批量扫描不调用 LLM（避免大量目录时超时），描述留空后续按需生成
+                description = ""
 
                 # 写入 SQLite
                 item = PortableSoftware(
@@ -510,6 +508,7 @@ async def scan_and_import(
                 logger.info("扫描导入: %s -> %s", software_name, exe_path_str)
 
             except Exception as e:
+                await db.rollback()
                 failed += 1
                 details.append(
                     {"name": software_name, "status": "failed", "reason": str(e)}

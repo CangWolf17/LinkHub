@@ -497,21 +497,27 @@ async def scan_workspaces(
                 )
                 continue
 
-            item = Workspace(
-                name=ws_name,
-                directory_path=dir_path_str,
-                status="active",
-            )
-            db.add(item)
-            await db.flush()
-            await db.commit()
+            try:
+                item = Workspace(
+                    name=ws_name,
+                    directory_path=dir_path_str,
+                    status="active",
+                )
+                db.add(item)
+                await db.flush()
+                await db.commit()
 
-            existing_paths.add(dir_path_str)
-            imported += 1
-            details.append(
-                {"name": ws_name, "status": "imported", "path": dir_path_str}
-            )
-            logger.info("工作区扫描导入: %s", dir_path_str)
+                existing_paths.add(dir_path_str)
+                imported += 1
+                details.append(
+                    {"name": ws_name, "status": "imported", "path": dir_path_str}
+                )
+                logger.info("工作区扫描导入: %s", dir_path_str)
+            except Exception as e:
+                await db.rollback()
+                skipped += 1
+                details.append({"name": ws_name, "status": "skipped", "reason": str(e)})
+                logger.warning("工作区导入失败: %s -> %s", ws_name, e)
 
     return WorkspaceScanResponse(
         success=True,
