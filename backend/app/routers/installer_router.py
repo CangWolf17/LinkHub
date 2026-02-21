@@ -28,10 +28,11 @@ from app.core.config import (
     DEFAULT_ALLOWED_DIRS,
     EXE_PRIORITY_KEYWORDS,
 )
+from app.core.crypto import decrypt_value
 from app.core.database import get_db
 from app.core.vector_store import get_software_collection
 from app.models.models import PortableSoftware, SystemSetting
-from app.schemas.installer_schemas import InstallerUploadResponse
+from app.schemas.installer_schemas import InstallerUploadResponse, ScanDirsResponse
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,7 @@ async def _generate_description_via_llm(
 
         base_url = config.get("llm_base_url", "").strip()
         api_key = config.get("llm_api_key", "").strip()
+        api_key = decrypt_value(api_key)  # 支持 DPAPI 加密值
         model = config.get("model_chat", "").strip()
 
         if not all([base_url, api_key, model]):
@@ -381,3 +383,144 @@ async def upload_and_install(
                 temp_archive.unlink()
             except OSError:
                 pass
+
+
+# ── 扫描导入端点 ─────────────────────────────────────────
+
+
+@router.post(
+    "/scan-dirs",
+    response_model=ScanDirsResponse,
+    summary="扫描白名单目录，导入已有便携软件",
+)
+async def scan_and_import(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    遍历 system_settings 中 allowed_dirs 配置的所有白名单目录。
+    将每个一级子目录视为一个独立软件，使用启发式算法寻找主可执行文件并写入数据库。
+
+    规则:
+      - 仅处理直接子目录（不递归跨目录）
+      - 若 executable_path 已存在于数据库，跳过（去重）
+      - LLM 描述生成为非阻塞可选步骤
+      - 同时更新 ChromaDB 向量索引
+    """
+    # 读取白名单目录列表
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key == "allowed_dirs")
+    )
+    setting = result.scalar_one_or_none()
+    scan_dirs: list[Path] = []
+    if setting and setting.value:
+        try:
+            raw = json.loads(setting.value)
+            if isinstance(raw, list):
+                scan_dirs = [Path(d) for d in raw if d]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if not scan_dirs:
+        scan_dirs = [Path(d) for d in DEFAULT_ALLOWED_DIRS]
+
+    # 读取数据库中已有的所有 executable_path，用于去重
+    existing_result = await db.execute(select(PortableSoftware.executable_path))
+    existing_paths: set[str] = {row for row in existing_result.scalars().all() if row}
+
+    imported = 0
+    skipped = 0
+    failed = 0
+    details: list[dict] = []
+
+    for base_dir in scan_dirs:
+        if not base_dir.exists() or not base_dir.is_dir():
+            logger.info("白名单目录不存在，跳过: %s", base_dir)
+            continue
+
+        # 遍历一级子目录，每个子目录视为一个软件
+        for subdir in sorted(base_dir.iterdir()):
+            if not subdir.is_dir():
+                continue
+
+            software_name = subdir.name
+
+            try:
+                # 启发式寻找可执行文件
+                executables = _find_executables(subdir)
+                if not executables:
+                    # 子目录内没有可执行文件，尝试将子目录本身作为记录（路径为目录）
+                    exe_path_str = ""
+                else:
+                    best = _heuristic_pick(executables, software_name)
+                    exe_path_str = str(best) if best else str(executables[0])
+
+                # 去重：若路径已在数据库，跳过
+                if exe_path_str and exe_path_str in existing_paths:
+                    skipped += 1
+                    details.append(
+                        {"name": software_name, "status": "skipped", "reason": "已存在"}
+                    )
+                    continue
+
+                # 按名称去重：若同名软件已存在，也跳过
+                name_check = await db.execute(
+                    select(PortableSoftware).where(
+                        PortableSoftware.name == software_name
+                    )
+                )
+                if name_check.scalar_one_or_none() is not None:
+                    skipped += 1
+                    details.append(
+                        {
+                            "name": software_name,
+                            "status": "skipped",
+                            "reason": "同名已存在",
+                        }
+                    )
+                    continue
+
+                # LLM 描述（非阻塞）
+                description = await _generate_description_via_llm(
+                    software_name, exe_path_str or str(subdir), db
+                )
+
+                # 写入 SQLite
+                item = PortableSoftware(
+                    name=software_name,
+                    executable_path=exe_path_str,
+                    description=description or None,
+                )
+                db.add(item)
+                await db.flush()
+                await db.refresh(item)
+                await db.commit()
+
+                # 写入 ChromaDB
+                _index_to_chroma(item.id, software_name, description, exe_path_str)
+
+                existing_paths.add(exe_path_str)
+                imported += 1
+                details.append(
+                    {
+                        "name": software_name,
+                        "status": "imported",
+                        "executable_path": exe_path_str,
+                        "description": description,
+                    }
+                )
+                logger.info("扫描导入: %s -> %s", software_name, exe_path_str)
+
+            except Exception as e:
+                failed += 1
+                details.append(
+                    {"name": software_name, "status": "failed", "reason": str(e)}
+                )
+                logger.warning("扫描导入失败: %s -> %s", software_name, e)
+
+    return ScanDirsResponse(
+        success=True,
+        imported=imported,
+        skipped=skipped,
+        failed=failed,
+        details=details,
+        message=f"扫描完成：新导入 {imported} 个，跳过 {skipped} 个，失败 {failed} 个",
+    )

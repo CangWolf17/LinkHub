@@ -112,13 +112,87 @@
       </button>
       <p v-if="reindexMsg" class="mt-2 text-xs text-green-600">{{ reindexMsg }}</p>
     </div>
+
+    <!-- 初始化扫描 -->
+    <h3 class="text-lg font-bold text-gray-900 mt-8 mb-2">初始化导入</h3>
+    <p class="text-sm text-gray-500 mb-4">
+      扫描白名单目录（allowed_dirs），将已有的便携软件和工作区目录批量导入数据库。已存在的记录会自动跳过。
+    </p>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-5">
+      <!-- 软件扫描 -->
+      <div>
+        <div class="flex items-center gap-3">
+          <button
+            class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            :disabled="scanningApps"
+            @click="doScanApps"
+          >
+            {{ scanningApps ? '扫描中...' : '扫描导入软件' }}
+          </button>
+          <span v-if="scanAppsResult" class="text-sm" :class="scanAppsResult.success ? 'text-green-600' : 'text-red-600'">
+            {{ scanAppsResult.message }}
+          </span>
+        </div>
+        <div v-if="scanAppsResult && scanAppsResult.details.length" class="mt-3 max-h-48 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+          <div
+            v-for="d in scanAppsResult.details"
+            :key="d.name"
+            class="flex items-center gap-2 px-3 py-1.5 text-xs"
+          >
+            <span
+              class="w-14 shrink-0 text-center rounded-full px-1.5 py-0.5 font-medium"
+              :class="{
+                'bg-green-100 text-green-700': d.status === 'imported',
+                'bg-gray-100 text-gray-500': d.status === 'skipped',
+                'bg-red-100 text-red-600': d.status === 'failed',
+              }"
+            >{{ d.status === 'imported' ? '导入' : d.status === 'skipped' ? '跳过' : '失败' }}</span>
+            <span class="text-gray-800 truncate">{{ d.name }}</span>
+            <span v-if="d.reason" class="text-gray-400 ml-auto shrink-0">{{ d.reason }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 工作区扫描 -->
+      <div class="border-t border-gray-100 pt-5">
+        <div class="flex items-center gap-3">
+          <button
+            class="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors"
+            :disabled="scanningWs"
+            @click="doScanWorkspaces"
+          >
+            {{ scanningWs ? '扫描中...' : '扫描导入工作区' }}
+          </button>
+          <span v-if="scanWsResult" class="text-sm" :class="scanWsResult.success ? 'text-green-600' : 'text-red-600'">
+            {{ scanWsResult.message }}
+          </span>
+        </div>
+        <div v-if="scanWsResult && scanWsResult.details.length" class="mt-3 max-h-48 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+          <div
+            v-for="d in scanWsResult.details"
+            :key="d.name"
+            class="flex items-center gap-2 px-3 py-1.5 text-xs"
+          >
+            <span
+              class="w-14 shrink-0 text-center rounded-full px-1.5 py-0.5 font-medium"
+              :class="{
+                'bg-green-100 text-green-700': d.status === 'imported',
+                'bg-gray-100 text-gray-500': d.status === 'skipped',
+              }"
+            >{{ d.status === 'imported' ? '导入' : '跳过' }}</span>
+            <span class="text-gray-800 truncate">{{ d.name }}</span>
+            <span v-if="d.reason" class="text-gray-400 ml-auto shrink-0">{{ d.reason }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
-import { getLlmConfig, updateLlmConfig, testLlmConnection, getIndexStats, reindexAll } from '@/api'
-import type { LlmConfig, IndexStats } from '@/api'
+import { getLlmConfig, updateLlmConfig, testLlmConnection, getIndexStats, reindexAll, scanAndImportSoftware, scanAndImportWorkspaces } from '@/api'
+import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse } from '@/api'
 
 const currentConfig = ref<LlmConfig | null>(null)
 const form = reactive({
@@ -142,6 +216,11 @@ const messageClass = computed(() =>
 const stats = reactive<IndexStats>({ software_count: 0, workspace_count: 0 })
 const reindexing = ref(false)
 const reindexMsg = ref('')
+
+const scanningApps = ref(false)
+const scanAppsResult = ref<ScanDirsResponse | null>(null)
+const scanningWs = ref(false)
+const scanWsResult = ref<WorkspaceScanResponse | null>(null)
 
 async function loadConfig() {
   try {
@@ -210,6 +289,34 @@ async function doReindex() {
     reindexMsg.value = '重建索引失败'
   } finally {
     reindexing.value = false
+  }
+}
+
+async function doScanApps() {
+  scanningApps.value = true
+  scanAppsResult.value = null
+  try {
+    const { data } = await scanAndImportSoftware()
+    scanAppsResult.value = data
+    await loadStats()
+  } catch {
+    scanAppsResult.value = { success: false, imported: 0, skipped: 0, failed: 0, details: [], message: '扫描失败，请检查服务日志' }
+  } finally {
+    scanningApps.value = false
+  }
+}
+
+async function doScanWorkspaces() {
+  scanningWs.value = true
+  scanWsResult.value = null
+  try {
+    const { data } = await scanAndImportWorkspaces()
+    scanWsResult.value = data
+    await loadStats()
+  } catch {
+    scanWsResult.value = { success: false, imported: 0, skipped: 0, details: [], message: '扫描失败，请检查服务日志' }
+  } finally {
+    scanningWs.value = false
   }
 }
 

@@ -98,3 +98,13 @@ class WorkspaceListResponse(BaseModel):
 
     items: list[WorkspaceResponse]
     total: int
+
+
+class WorkspaceScanResponse(BaseModel):
+    """工作区扫描导入响应"""
+
+    success: bool
+    imported: int = Field(0, description="本次新导入的工作区数量")
+    skipped: int = Field(0, description="已存在跳过的数量")
+    details: list[dict] = Field(default_factory=list)
+    message: str = ""

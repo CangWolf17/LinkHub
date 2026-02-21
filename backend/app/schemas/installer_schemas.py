@@ -21,9 +21,12 @@ class InstallerUploadResponse(BaseModel):
     message: str = Field("", description="处理状态消息")
 
 
-class InstallerStatusResponse(BaseModel):
-    """安装进度查询响应（预留，当前为同步处理）"""
+class ScanDirsResponse(BaseModel):
+    """目录扫描导入响应"""
 
-    stage: str = Field("", description="当前阶段: uploading/extracting/analyzing/done")
-    progress: float = Field(0.0, ge=0.0, le=1.0, description="进度 0~1")
+    success: bool
+    imported: int = Field(0, description="本次新导入的软件数量")
+    skipped: int = Field(0, description="已存在跳过的软件数量")
+    failed: int = Field(0, description="处理失败的数量")
+    details: list[dict] = Field(default_factory=list, description="每个导入项的详情")
     message: str = ""

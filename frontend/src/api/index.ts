@@ -65,6 +65,23 @@ export interface InstallerUploadResponse {
   message: string
 }
 
+export interface ScanDirsResponse {
+  success: boolean
+  imported: number
+  skipped: number
+  failed: number
+  details: Array<{ name: string; status: string; reason?: string; executable_path?: string; description?: string }>
+  message: string
+}
+
+export interface WorkspaceScanResponse {
+  success: boolean
+  imported: number
+  skipped: number
+  details: Array<{ name: string; status: string; reason?: string; path?: string }>
+  message: string
+}
+
 export interface IndexStats {
   software_count: number
   workspace_count: number
@@ -138,6 +155,12 @@ export const uploadInstall = (file: File) => {
     timeout: 300_000,
   })
 }
+
+export const scanAndImportSoftware = () =>
+  http.post<ScanDirsResponse>('/installer/scan-dirs')
+
+export const scanAndImportWorkspaces = () =>
+  http.post<WorkspaceScanResponse>('/metadata/workspaces/scan')
 
 // ── Search (ChromaDB) ───────────────────────────────────
 

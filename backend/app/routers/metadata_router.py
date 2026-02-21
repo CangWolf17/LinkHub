@@ -7,6 +7,7 @@
   - GET 列表时对路径执行 os.path.exists() 死链检测，标记 is_missing
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.models import PortableSoftware, Workspace
+from app.models.models import PortableSoftware, SystemSetting, Workspace
 from app.schemas.metadata_schemas import (
     SoftwareCreate,
     SoftwareListResponse,
@@ -25,6 +26,7 @@ from app.schemas.metadata_schemas import (
     WorkspaceCreate,
     WorkspaceListResponse,
     WorkspaceResponse,
+    WorkspaceScanResponse,
     WorkspaceUpdate,
 )
 
@@ -415,3 +417,106 @@ async def cleanup_dead_workspaces(
     await db.commit()
     logger.info("清理死链工作区: 共 %d 条", len(removed))
     return {"removed_count": len(removed), "removed": removed}
+
+
+@router.post(
+    "/workspaces/scan",
+    response_model=WorkspaceScanResponse,
+    summary="扫描目录，批量导入已有工作区",
+)
+async def scan_workspaces(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    遍历 system_settings 中 allowed_dirs 配置的所有路径。
+    将每个一级子目录视为一个独立工作区导入（状态默认 active）。
+
+    规则:
+      - 仅扫描直接子目录（非软件目录的其他路径）
+      - 若 directory_path 已存在于数据库，跳过
+      - 若同名工作区已存在，跳过
+    """
+    # 读取白名单目录列表
+    result = await db.execute(
+        select(SystemSetting).where(SystemSetting.key == "allowed_dirs")
+    )
+    setting = result.scalar_one_or_none()
+    scan_dirs: list[Path] = []
+    if setting and setting.value:
+        try:
+            raw = json.loads(setting.value)
+            if isinstance(raw, list):
+                scan_dirs = [Path(d) for d in raw if d]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if not scan_dirs:
+        return WorkspaceScanResponse(
+            success=True,
+            imported=0,
+            skipped=0,
+            details=[],
+            message="未配置 allowed_dirs，请先在设置中配置白名单目录",
+        )
+
+    # 读取数据库中已有的 directory_path
+    existing_result = await db.execute(select(Workspace.directory_path))
+    existing_paths: set[str] = {r for r in existing_result.scalars().all() if r}
+
+    imported = 0
+    skipped = 0
+    details: list[dict] = []
+
+    for base_dir in scan_dirs:
+        if not base_dir.exists() or not base_dir.is_dir():
+            continue
+
+        for subdir in sorted(base_dir.iterdir()):
+            if not subdir.is_dir():
+                continue
+
+            dir_path_str = str(subdir)
+            ws_name = subdir.name
+
+            # 路径去重
+            if dir_path_str in existing_paths:
+                skipped += 1
+                details.append(
+                    {"name": ws_name, "status": "skipped", "reason": "路径已存在"}
+                )
+                continue
+
+            # 同名去重
+            name_check = await db.execute(
+                select(Workspace).where(Workspace.name == ws_name)
+            )
+            if name_check.scalar_one_or_none() is not None:
+                skipped += 1
+                details.append(
+                    {"name": ws_name, "status": "skipped", "reason": "同名已存在"}
+                )
+                continue
+
+            item = Workspace(
+                name=ws_name,
+                directory_path=dir_path_str,
+                status="active",
+            )
+            db.add(item)
+            await db.flush()
+            await db.commit()
+
+            existing_paths.add(dir_path_str)
+            imported += 1
+            details.append(
+                {"name": ws_name, "status": "imported", "path": dir_path_str}
+            )
+            logger.info("工作区扫描导入: %s", dir_path_str)
+
+    return WorkspaceScanResponse(
+        success=True,
+        imported=imported,
+        skipped=skipped,
+        details=details,
+        message=f"扫描完成：新导入 {imported} 个工作区，跳过 {skipped} 个",
+    )
