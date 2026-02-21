@@ -91,6 +91,22 @@ export interface IndexStats {
 
 export const getHealth = () => http.get<{ status: string }>('/health')
 
+// ── System ───────────────────────────────────────────────
+
+export const getInitStatus = () =>
+  http.get<{
+    needs_setup: boolean
+    allowed_dirs: string[]
+    llm_configured: boolean
+    dirs_are_default: boolean
+  }>('/system/init-status')
+
+export const getAllowedDirs = () =>
+  http.get<{ allowed_dirs: string[] }>('/system/allowed-dirs')
+
+export const updateAllowedDirs = (dirs: string[]) =>
+  http.put<{ allowed_dirs: string[] }>('/system/allowed-dirs', { allowed_dirs: dirs })
+
 // ── Software (Module B) ─────────────────────────────────
 
 export const getSoftwareList = (params?: { search?: string }) =>

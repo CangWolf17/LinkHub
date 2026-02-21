@@ -24,6 +24,7 @@ from app.routers import (
     metadata_router,
     os_router,
     search_router,
+    system_router,
 )
 
 # ── 日志配置 ──────────────────────────────────────────────
@@ -137,6 +138,7 @@ app.add_middleware(
 )
 
 # ── 注册路由 ──────────────────────────────────────────────
+app.include_router(system_router.router)
 app.include_router(os_router.router)
 app.include_router(metadata_router.router)
 app.include_router(llm_router.router)

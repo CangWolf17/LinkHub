@@ -67,15 +67,19 @@
 
     <!-- LLM Debug 悬浮窗 -->
     <LlmDebugMonitor />
+
+    <!-- 首次启动向导 -->
+    <SetupWizard v-if="showWizard" @done="onWizardDone" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { getHealth, getLlmConfig } from '@/api'
+import { getHealth, getLlmConfig, getInitStatus } from '@/api'
 import { useLlmMonitor } from '@/composables/useLlmMonitor'
 import SearchBar from '@/components/SearchBar.vue'
 import LlmDebugMonitor from '@/components/LlmDebugMonitor.vue'
+import SetupWizard from '@/components/SetupWizard.vue'
 
 const { state: _llmState, ...llmMonitor } = useLlmMonitor()
 
@@ -87,6 +91,7 @@ const navItems = [
 
 const serverOnline = ref(false)
 const llmConfigured = ref(false)
+const showWizard = ref(false)
 
 const llmBadgeClass = computed(() =>
   llmConfigured.value
@@ -114,8 +119,25 @@ async function checkStatus() {
   }
 }
 
+async function checkInitStatus() {
+  try {
+    const { data } = await getInitStatus()
+    if (data.needs_setup) {
+      showWizard.value = true
+    }
+  } catch {
+    // 无法判断时不弹窗，静默失败
+  }
+}
+
+function onWizardDone() {
+  showWizard.value = false
+  checkStatus()
+}
+
 onMounted(() => {
   checkStatus()
+  checkInitStatus()
   // 每 30 秒检查一次
   setInterval(checkStatus, 30_000)
 })
