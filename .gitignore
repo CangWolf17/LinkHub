@@ -70,3 +70,8 @@ coverage
 .env.production.local
 *.pem
 credentials.json
+
+# LinkHub runtime data (SQLite DB, ChromaDB, server logs)
+backend/app/data/
+backend/*.log
+backend/uploads/

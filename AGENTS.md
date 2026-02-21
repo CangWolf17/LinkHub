@@ -3,16 +3,17 @@
 ## 🤖 Context for AI Agents
 **ALL** coding agents must read and strictly adhere to these instructions.
 
+## 👤 User Preferences
+- **User:** Tim
+- **Language:** Chinese
+
 ## 🛡️ Critical Deletion Protocol
 **ALL** file deletion operations must strictly follow this workflow:
 1.  **Generate Command:** Create the deletion command using the project's dedicated recycle script but **DO NOT** execute it.
-    *   **Tool:** `.
-    ecycle_file.ps1`
+    *   **Tool:** `.\recycle_file.ps1`
     *   **Batching Strategy:** **ALWAYS** pass multiple files in a single command. **DO NOT** run the script inside a loop.
-    *   **Syntax:** `powershell -ExecutionPolicy Bypass -File .
-    ecycle_file.ps1 -FilePath "path1", "path2"`
-    *   **List Input:** `powershell -ExecutionPolicy Bypass -File .
-    ecycle_file.ps1 -PathListFile "list.txt"`
+    *   **Syntax:** `powershell -ExecutionPolicy Bypass -File .\recycle_file.ps1 -FilePath "path1", "path2"`
+    *   **List Input:** `powershell -ExecutionPolicy Bypass -File .\recycle_file.ps1 -PathListFile "list.txt"`
 2.  **List Files:** Explicitly list every file that will be affected.
 3.  **Request Confirmation:** Present the list and command to the user.
 4.  **Execute Later:** Only execute in the **next** turn after confirmation.
@@ -37,9 +38,7 @@ For tasks involving **>3 steps** or modifying **multiple files**, agents **MUST*
 ```
 
 ## 🛠 Tech Stack & Style
-- **Runtime:** Node.js (Frontend Vue 3) / Python 3.10+ (Backend FastAPI)
-- **Database:** SQLite (WAL mode enforced) / ChromaDB
+- **Runtime:** Node.js / Python
 - **Python Path:** D:\Miniconda\python.exe
-- **Network Constraint:** All backend services must bind to `127.0.0.1`.
 - **Encoding:** Always handle files as UTF-8.
 - **Style:** Adhere to project `.editorconfig` or `.prettierrc`.

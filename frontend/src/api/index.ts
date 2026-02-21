@@ -1,0 +1,159 @@
+/**
+ * API 模块：统一封装所有后端接口调用
+ */
+import http from './http'
+
+// ── Types ────────────────────────────────────────────────
+
+export interface Software {
+  id: string
+  name: string
+  executable_path: string
+  description: string | null
+  tags: string | null
+  icon_path: string | null
+  is_missing?: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface Workspace {
+  id: string
+  name: string
+  directory_path: string
+  description: string | null
+  deadline: string | null
+  status: string
+  is_missing?: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface LlmConfig {
+  llm_base_url: string
+  llm_api_key: string
+  has_api_key: boolean
+  model_chat: string
+  model_embedding: string
+}
+
+export interface SearchResultItem {
+  id: string
+  name: string
+  type: string
+  description: string | null
+  path: string
+  score: number
+  is_missing: boolean
+}
+
+export interface SearchResponse {
+  success: boolean
+  results: SearchResultItem[]
+  total: number
+  query: string
+}
+
+export interface InstallerUploadResponse {
+  success: boolean
+  software_id: string
+  name: string
+  executable_path: string
+  install_dir: string
+  description: string
+  exe_candidates: string[]
+  message: string
+}
+
+export interface IndexStats {
+  software_count: number
+  workspace_count: number
+}
+
+// ── Health ───────────────────────────────────────────────
+
+export const getHealth = () => http.get<{ status: string }>('/health')
+
+// ── Software (Module B) ─────────────────────────────────
+
+export const getSoftwareList = (params?: { search?: string }) =>
+  http.get<{ items: Software[]; total: number }>('/metadata/software', { params })
+
+export const getSoftware = (id: string) =>
+  http.get<Software>(`/metadata/software/${id}`)
+
+export const createSoftware = (data: Partial<Software>) =>
+  http.post<Software>('/metadata/software', data)
+
+export const updateSoftware = (id: string, data: Partial<Software>) =>
+  http.put<Software>(`/metadata/software/${id}`, data)
+
+export const deleteSoftware = (id: string) =>
+  http.delete(`/metadata/software/${id}`)
+
+export const cleanupDeadSoftware = () =>
+  http.delete<{ removed_count: number }>('/metadata/software/cleanup/dead-links')
+
+// ── Workspaces (Module B) ────────────────────────────────
+
+export const getWorkspaceList = (params?: { search?: string; status?: string }) =>
+  http.get<{ items: Workspace[]; total: number }>('/metadata/workspaces', { params })
+
+export const getWorkspace = (id: string) =>
+  http.get<Workspace>(`/metadata/workspaces/${id}`)
+
+export const createWorkspace = (data: Partial<Workspace>) =>
+  http.post<Workspace>('/metadata/workspaces', data)
+
+export const updateWorkspace = (id: string, data: Partial<Workspace>) =>
+  http.put<Workspace>(`/metadata/workspaces/${id}`, data)
+
+export const deleteWorkspace = (id: string) =>
+  http.delete(`/metadata/workspaces/${id}`)
+
+export const cleanupDeadWorkspaces = () =>
+  http.delete<{ removed_count: number }>('/metadata/workspaces/cleanup/dead-links')
+
+// ── LLM Gateway (Module C) ──────────────────────────────
+
+export const getLlmConfig = () =>
+  http.get<LlmConfig>('/llm/config')
+
+export const updateLlmConfig = (data: Partial<LlmConfig>) =>
+  http.put<LlmConfig>('/llm/config', data)
+
+export const testLlmConnection = () =>
+  http.post<{ success: boolean; message: string; model: string; raw_response: unknown }>('/llm/test-connection')
+
+export const llmChat = (messages: Array<{ role: string; content: string }>) =>
+  http.post('/llm/chat', { messages })
+
+// ── Installer (Module D) ────────────────────────────────
+
+export const uploadInstall = (file: File) => {
+  const form = new FormData()
+  form.append('file', file)
+  return http.post<InstallerUploadResponse>('/installer/upload', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300_000,
+  })
+}
+
+// ── Search (ChromaDB) ───────────────────────────────────
+
+export const semanticSearch = (query: string, topK = 10, scope = 'all') =>
+  http.post<SearchResponse>('/search', { query, top_k: topK, scope })
+
+export const getIndexStats = () =>
+  http.get<IndexStats>('/search/stats')
+
+export const reindexAll = () =>
+  http.post<{ success: boolean; software_indexed: number; workspace_indexed: number; message: string }>('/search/reindex')
+
+// ── OS Bridge (Module A) ────────────────────────────────
+
+export const launchApp = (targetPath: string) =>
+  http.post('/os/launch', { target_path: targetPath })
+
+export const openDir = (targetPath: string) =>
+  http.post('/os/open-dir', { target_path: targetPath })

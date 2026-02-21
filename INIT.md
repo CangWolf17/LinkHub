@@ -38,13 +38,17 @@
 ```
 
 #### B. `AGENTS.md` (Operational Protocols)
-*Replace `{{Python_Path}}` with user input.*
+*Replace `{{...}}` with user inputs.*
 
 ```markdown
 # AGENTS.md
 
 ## 🤖 Context for AI Agents
 **ALL** coding agents must read and strictly adhere to these instructions.
+
+## 👤 User Preferences
+- **User:** {{User_Name}}
+- **Language:** {{User_Language}}
 
 ## 🛡️ Critical Deletion Protocol
 **ALL** file deletion operations must strictly follow this workflow:
