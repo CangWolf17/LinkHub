@@ -159,8 +159,10 @@ async def lifespan(app: FastAPI):
 
         get_chroma_client()
         logger.info("ChromaDB 向量数据库已就绪")
-    except ImportError:
-        logger.info("ChromaDB 不可用（lite 版），语义搜索已禁用")
+    except ImportError as exc:
+        logger.info("ChromaDB 不可用（lite 版），语义搜索已禁用: %s", exc)
+    except Exception as exc:
+        logger.error("ChromaDB 初始化失败: %s", exc, exc_info=True)
 
     logger.info("LinkHub 启动完成 -> http://%s:%s", APP_HOST, APP_PORT)
 
@@ -188,7 +190,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LinkHub - Local Smart Dashboard",
     description="本地智能工作区与软件控制台",
-    version="1.0.0",
+    version="1.0.1",
     lifespan=lifespan,
 )
 

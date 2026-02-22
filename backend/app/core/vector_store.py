@@ -14,9 +14,10 @@ try:
     import chromadb
 
     HAS_CHROMADB = True
-except ImportError:
+except ImportError as _exc:
     HAS_CHROMADB = False
     chromadb = None  # type: ignore[assignment]
+    logger.warning("chromadb 导入失败: %s", _exc)
 
 # ── 全局 ChromaDB Client ─────────────────────────────────
 _chroma_client = None

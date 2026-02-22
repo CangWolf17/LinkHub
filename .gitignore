@@ -78,6 +78,13 @@ backend/logs/
 backend/*.log
 backend/uploads/
 
+# Build tools (UPX etc.)
+tools/
+*.zip
+
+# Temp scripts
+_check_*.py
+
 # Internal dev / AI Agent files
 TASK.md
 INIT.md
