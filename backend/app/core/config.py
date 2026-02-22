@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import TypedDict
 
@@ -22,10 +23,31 @@ class DirEntry(TypedDict):
     type: str  # "software" | "workspace"
 
 
-# ── 路径配置 ──────────────────────────────────────────────
-BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
-DATA_DIR = BASE_DIR / "data"
+# ── 打包模式检测 ──────────────────────────────────────────
+IS_FROZEN = getattr(sys, "frozen", False)
+"""True when running inside a PyInstaller bundle."""
+
+if IS_FROZEN:
+    # PyInstaller 单文件模式: sys._MEIPASS 是临时解压目录
+    # exe 所在目录用于持久化数据
+    _BUNDLE_DIR = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    _EXE_DIR = Path(sys.executable).resolve().parent
+    # 后端代码在 _MEIPASS/backend/app/... 下
+    BASE_DIR = _BUNDLE_DIR / "backend"
+    # 持久化数据放在 exe 旁
+    DATA_DIR = _EXE_DIR / "data"
+    LOG_DIR = _EXE_DIR / "logs"
+    # 前端静态文件
+    FRONTEND_DIST_DIR = _BUNDLE_DIR / "frontend_dist"
+else:
+    # 开发模式
+    BASE_DIR = Path(__file__).resolve().parent.parent  # backend/app/.. -> backend/
+    DATA_DIR = BASE_DIR / "data"
+    LOG_DIR = BASE_DIR / "logs"
+    FRONTEND_DIST_DIR = BASE_DIR.parent / "frontend" / "dist"
+
 DATA_DIR.mkdir(exist_ok=True)
+LOG_DIR.mkdir(exist_ok=True)
 
 DATABASE_URL = f"sqlite+aiosqlite:///{DATA_DIR / 'linkhub.db'}"
 

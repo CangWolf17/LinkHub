@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.vector_store import (
+    HAS_CHROMADB,
     get_software_collection,
     get_workspace_collection,
 )
@@ -116,6 +117,11 @@ async def semantic_search(req: SearchRequest):
       - software: 仅搜索软件
       - workspaces: 仅搜索工作区
     """
+    if not HAS_CHROMADB:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="语义搜索不可用（lite 版不含 ChromaDB）",
+        )
     all_results: list[SearchResultItem] = []
 
     if req.scope in ("all", "software"):
@@ -151,6 +157,8 @@ async def semantic_search(req: SearchRequest):
 )
 async def get_index_stats():
     """返回 ChromaDB 中各 collection 的文档数量。"""
+    if not HAS_CHROMADB:
+        return IndexStatsResponse(software_count=0, workspace_count=0)
     sw_collection = get_software_collection()
     ws_collection = get_workspace_collection()
 
@@ -173,6 +181,11 @@ async def reindex_all(
     全量重建 ChromaDB 向量索引。
     用于索引损坏或数据不一致时的修复操作。
     """
+    if not HAS_CHROMADB:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="语义搜索不可用（lite 版不含 ChromaDB）",
+        )
     sw_count = 0
     ws_count = 0
 

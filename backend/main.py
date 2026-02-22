@@ -8,24 +8,28 @@ import asyncio
 import json
 import logging
 import logging.handlers
+import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from app.core.config import (
     APP_HOST,
     APP_PORT,
     DEFAULT_ALLOWED_DIRS,
+    FRONTEND_DIST_DIR,
+    IS_FROZEN,
+    LOG_DIR,
     serialize_allowed_dirs,
 )
 from app.core.crypto import encrypt_value, is_encrypted
 from app.core.database import async_session_factory, engine
 from app.core.log_buffer import BufferHandler, log_broadcaster, log_buffer
-from app.core.vector_store import get_chroma_client, shutdown_chroma
 from app.models.models import Base, SystemSetting
 from app.routers import (
     installer_router,
@@ -40,8 +44,6 @@ from app.routers import (
 
 _LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
 _LOG_DATEFMT = "%H:%M:%S"
-_LOG_DIR = Path(__file__).parent / "logs"
-_LOG_DIR.mkdir(exist_ok=True)
 
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
@@ -66,7 +68,7 @@ if not any(isinstance(h, BufferHandler) for h in root_logger.handlers):
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     _file_handler = logging.handlers.RotatingFileHandler(
-        filename=_LOG_DIR / "linkhub.log",
+        filename=LOG_DIR / "linkhub.log",
         maxBytes=5 * 1024 * 1024,  # 5 MB
         backupCount=3,
         encoding="utf-8",
@@ -151,15 +153,30 @@ async def lifespan(app: FastAPI):
     # 迁移明文 API key → DPAPI 加密
     await _migrate_plaintext_api_key()
 
-    # 初始化 ChromaDB 向量数据库
-    get_chroma_client()
-    logger.info("ChromaDB 向量数据库已就绪")
+    # 初始化 ChromaDB 向量数据库（可选，lite 版不含此依赖）
+    try:
+        from app.core.vector_store import get_chroma_client
+
+        get_chroma_client()
+        logger.info("ChromaDB 向量数据库已就绪")
+    except ImportError:
+        logger.info("ChromaDB 不可用（lite 版），语义搜索已禁用")
 
     logger.info("LinkHub 启动完成 -> http://%s:%s", APP_HOST, APP_PORT)
+
+    # 打包模式下自动打开浏览器
+    if IS_FROZEN:
+        webbrowser.open(f"http://{APP_HOST}:{APP_PORT}")
+
     yield
 
     # 关闭 ChromaDB
-    shutdown_chroma()
+    try:
+        from app.core.vector_store import shutdown_chroma
+
+        shutdown_chroma()
+    except ImportError:
+        pass
 
     # 关闭引擎连接池
     await engine.dispose()
@@ -171,11 +188,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LinkHub - Local Smart Dashboard",
     description="本地智能工作区与软件控制台",
-    version="0.1.0",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
-# CORS: 仅允许本机前端开发服务器
+# CORS: 仅允许本机前端
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -183,6 +200,8 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://localhost:3000",
+        f"http://127.0.0.1:{APP_PORT}",  # 打包模式: 同源
+        f"http://localhost:{APP_PORT}",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -196,6 +215,27 @@ app.include_router(metadata_router.router)
 app.include_router(llm_router.router)
 app.include_router(installer_router.router)
 app.include_router(search_router.router)
+
+
+# ── 前端静态文件（打包模式）──────────────────────────────
+# 必须在 API 路由之后挂载，否则会拦截 /api/* 请求
+if FRONTEND_DIST_DIR.is_dir():
+    from fastapi.responses import FileResponse
+
+    @app.get("/", include_in_schema=False)
+    async def serve_index():
+        return FileResponse(FRONTEND_DIST_DIR / "index.html")
+
+    # SPA fallback: 非 /api 开头的路径返回 index.html
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        # 优先尝试静态文件
+        file = FRONTEND_DIST_DIR / full_path
+        if file.is_file():
+            return FileResponse(file)
+        return FileResponse(FRONTEND_DIST_DIR / "index.html")
+
+    logger.info("前端静态文件已挂载: %s", FRONTEND_DIST_DIR)
 
 
 # ── 健康检查 ──────────────────────────────────────────────
@@ -235,9 +275,9 @@ async def ws_logs(websocket: WebSocket):
 
 if __name__ == "__main__":
     uvicorn.run(
-        "main:app",
+        "main:app" if not IS_FROZEN else app,
         host=APP_HOST,
         port=APP_PORT,
-        reload=True,
+        reload=not IS_FROZEN,
         log_level="info",
     )

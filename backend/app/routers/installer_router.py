@@ -31,7 +31,7 @@ from app.core.config import (
 )
 from app.core.crypto import decrypt_value
 from app.core.database import get_db
-from app.core.vector_store import get_software_collection
+from app.core.vector_store import HAS_CHROMADB, get_software_collection
 from app.models.models import PortableSoftware, SystemSetting
 from app.schemas.installer_schemas import InstallerUploadResponse, ScanDirsResponse
 
@@ -207,6 +207,8 @@ async def _generate_description_via_llm(
 
 def _index_to_chroma(software_id: str, name: str, description: str, path: str):
     """将软件信息写入 ChromaDB 向量索引。"""
+    if not HAS_CHROMADB:
+        return
     try:
         collection = get_software_collection()
         doc_text = f"{name}. {description}" if description else name
