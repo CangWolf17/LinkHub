@@ -309,6 +309,28 @@
       </div>
     </div>
 
+    <!-- 服务管理 -->
+    <h3 class="text-lg font-bold text-gray-900 mt-8 mb-2">服务管理</h3>
+    <p class="text-sm text-gray-500 mb-4">
+      关闭 LinkHub 后端服务。所有数据已自动保存，关闭后浏览器页面将无法访问后端接口。
+    </p>
+    <div class="bg-white rounded-xl shadow-sm border border-red-200 p-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-900">关闭所有服务</p>
+          <p class="text-xs text-gray-500 mt-1">终止 LinkHub 后端进程，释放端口和系统资源</p>
+        </div>
+        <button
+          class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+          :disabled="shuttingDown"
+          @click="confirmShutdown"
+        >
+          {{ shuttingDown ? '正在关闭...' : '关闭服务' }}
+        </button>
+      </div>
+      <p v-if="shutdownMsg" class="mt-3 text-xs text-red-600">{{ shutdownMsg }}</p>
+    </div>
+
     <!-- 文件夹选择器弹窗 -->
     <FolderPickerDialog
       v-if="folderPickerIndex !== null"
@@ -321,7 +343,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
-import { getLlmConfig, updateLlmConfig, testLlmConnection, getIndexStats, reindexAll, scanAndImportSoftware, scanAndImportWorkspaces, getAllowedDirs, updateAllowedDirs } from '@/api'
+import { getLlmConfig, updateLlmConfig, testLlmConnection, getIndexStats, reindexAll, scanAndImportSoftware, scanAndImportWorkspaces, getAllowedDirs, updateAllowedDirs, shutdownServer } from '@/api'
 import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse, DirEntry } from '@/api'
 import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
 
@@ -526,6 +548,23 @@ function showMsg(msg: string, type: 'success' | 'error') {
   message.value = msg
   messageType.value = type
   setTimeout(() => { message.value = '' }, 5000)
+}
+
+// ── 服务管理 ─────────────────────────────────────────────
+const shuttingDown = ref(false)
+const shutdownMsg = ref('')
+
+async function confirmShutdown() {
+  if (!confirm('确定要关闭 LinkHub 服务吗？关闭后需要重新启动程序才能使用。')) return
+  shuttingDown.value = true
+  shutdownMsg.value = ''
+  try {
+    await shutdownServer()
+    shutdownMsg.value = '服务正在关闭，页面即将失去连接...'
+  } catch {
+    // 服务关闭后请求可能超时，这是正常的
+    shutdownMsg.value = '服务已关闭'
+  }
 }
 
 onMounted(() => {

@@ -41,15 +41,16 @@ LinkHub 是一款 **仅限本机访问** 的智能文件与便携软件管理系
 | 版本 | 大小 | 说明 |
 |------|------|------|
 | **LinkHub-lite.exe** | ~37 MB | 精简版，不含 ChromaDB 语义搜索 |
-| **LinkHub.exe** | ~500 MB | 完整版，含 ChromaDB 语义搜索 |
+| **LinkHub-full.zip** | ~500 MB | 完整版（ZIP 压缩包），含 ChromaDB 语义搜索 |
 
 > 推荐先使用 **lite 版**。大部分功能（软件管理、工作区、LLM 描述生成等）均可正常使用，仅语义搜索功能不可用。
 
 ### 使用
 
-1. 将 exe 放到任意目录（建议专门创建一个文件夹）
-2. 双击运行，浏览器会自动打开 `http://127.0.0.1:8147`
-3. 按照设置向导完成初始化配置
+1. **lite 版**：将 exe 放到任意目录（建议专门创建一个文件夹），双击运行
+2. **full 版**：解压 ZIP 到任意目录，运行其中的 `LinkHub.exe`
+3. 浏览器会自动打开 `http://127.0.0.1:8147`
+4. 按照设置向导完成初始化配置
 
 首次启动时会在 exe 所在目录自动创建：
 - `data/` — 数据库文件（`linkhub.db`）
@@ -176,6 +177,7 @@ LinkHub/
 | `GET` | `/health` | 健康检查 |
 | `GET` | `/system/init-status` | 系统初始化状态 |
 | `GET/PUT` | `/system/allowed-dirs` | 白名单目录读写 |
+| `POST` | `/system/shutdown` | 关闭服务 |
 | `GET/POST` | `/metadata/software` | 软件列表 / 创建 |
 | `GET/PUT/DELETE` | `/metadata/software/:id` | 软件详情 / 更新 / 删除 |
 | `GET/POST` | `/metadata/workspaces` | 工作区列表 / 创建 |

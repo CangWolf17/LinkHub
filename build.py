@@ -243,7 +243,7 @@ def create_zip(variant: str):
         print(f"错误: 文件夹不存在 {folder}")
         return None
 
-    zip_name = f"LinkHub-v1.0.1-full.zip"
+    zip_name = f"LinkHub-v1.0.0-full.zip"
     zip_path = DIST_DIR / zip_name
     print(f"\n=== 创建 ZIP: {zip_name} ===")
 

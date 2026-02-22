@@ -126,6 +126,9 @@ export const getAllowedDirs = () =>
 export const updateAllowedDirs = (dirs: DirEntry[]) =>
   http.put<{ allowed_dirs: DirEntry[] }>('/system/allowed-dirs', { allowed_dirs: dirs })
 
+export const shutdownServer = () =>
+  http.post<{ message: string }>('/system/shutdown')
+
 // ── Software (Module B) ─────────────────────────────────
 
 export const getSoftwareList = (params?: { search?: string }) =>

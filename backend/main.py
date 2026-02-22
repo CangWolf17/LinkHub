@@ -8,9 +8,21 @@ import asyncio
 import json
 import logging
 import logging.handlers
+import os
+import signal
+import sys
 import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# ── PyInstaller --noconsole 修复 ──────────────────────────
+# PyInstaller --noconsole 模式下 sys.stdout / sys.stderr 为 None，
+# 导致 uvicorn DefaultFormatter 调用 sys.stderr.isatty() 崩溃。
+# 在所有 import 之前修复，确保日志系统正常初始化。
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -190,7 +202,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LinkHub - Local Smart Dashboard",
     description="本地智能工作区与软件控制台",
-    version="1.0.1",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -276,6 +288,20 @@ async def ws_logs(websocket: WebSocket):
 # ── 启动入口 ──────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # 打包模式防僵尸进程：注册 atexit 确保进程树完整退出
+    if IS_FROZEN:
+        import atexit
+
+        def _force_exit():
+            """兜底退出：若正常 shutdown 流程卡住，强制终止进程。"""
+            try:
+                logger.info("atexit: 强制终止进程")
+            except Exception:
+                pass
+            os._exit(0)
+
+        atexit.register(_force_exit)
+
     uvicorn.run(
         "main:app" if not IS_FROZEN else app,
         host=APP_HOST,

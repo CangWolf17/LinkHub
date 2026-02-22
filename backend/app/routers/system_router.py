@@ -4,9 +4,13 @@
 职责:
   - 提供初始化状态检测（前端向导弹窗触发依据）
   - 提供 allowed_dirs 的读写管理
+  - 提供服务关闭端点（优雅终止整个进程）
 """
 
 import logging
+import os
+import signal
+import sys
 from typing import Union
 
 from fastapi import APIRouter, Depends
@@ -130,3 +134,35 @@ async def update_allowed_dirs(
     await db.commit()
     logger.info("allowed_dirs 已更新: %s", entries)
     return {"allowed_dirs": entries}
+
+
+@router.post(
+    "/shutdown",
+    summary="关闭 LinkHub 服务",
+)
+async def shutdown_server():
+    """
+    优雅关闭整个 LinkHub 进程。
+
+    先返回 HTTP 200，然后向自身进程发送终止信号。
+    打包模式使用 os._exit 确保无僵尸进程残留；
+    开发模式发送 SIGINT 让 uvicorn 正常走 shutdown 流程。
+    """
+    import asyncio
+
+    logger.info("收到关闭请求，服务将在 1 秒后终止...")
+
+    async def _delayed_shutdown():
+        await asyncio.sleep(1)
+        logger.info("LinkHub 正在终止进程...")
+        from app.core.config import IS_FROZEN
+
+        if IS_FROZEN:
+            # 打包模式：直接退出，避免僵尸进程
+            os._exit(0)
+        else:
+            # 开发模式：发送 SIGINT 让 uvicorn 优雅停止
+            os.kill(os.getpid(), signal.SIGINT)
+
+    asyncio.get_event_loop().create_task(_delayed_shutdown())
+    return {"message": "服务正在关闭..."}
