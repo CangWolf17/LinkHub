@@ -3,6 +3,32 @@
     <div class="flex items-center justify-between mb-6">
       <h2 class="text-xl font-bold text-gray-900">软件舱</h2>
       <div class="flex items-center gap-2">
+        <!-- 多选模式切换 -->
+        <button
+          class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+          :class="selectMode
+            ? 'text-white bg-blue-600 hover:bg-blue-700'
+            : 'text-blue-600 bg-blue-50 hover:bg-blue-100'"
+          @click="toggleSelectMode"
+        >
+          {{ selectMode ? '取消选择' : '多选' }}
+        </button>
+        <!-- 批量删除按钮 -->
+        <button
+          v-if="selectMode && selectedIds.size > 0"
+          class="px-3 py-1.5 text-xs font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors"
+          @click="batchDelete"
+        >
+          删除选中 ({{ selectedIds.size }})
+        </button>
+        <!-- 全选 -->
+        <button
+          v-if="selectMode"
+          class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+          @click="toggleSelectAll"
+        >
+          {{ selectedIds.size === items.length ? '取消全选' : '全选' }}
+        </button>
         <button
           v-if="itemsWithoutDescription.length > 0"
           class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50"
@@ -63,9 +89,13 @@
         v-for="sw in items"
         :key="sw.id"
         :software="sw"
+        :selectable="selectMode"
+        :selected="selectedIds.has(sw.id)"
         @launch="handleLaunch"
         @delete="handleDelete"
         @updated="handleUpdated"
+        @toggle-select="toggleSelect"
+        @open-dir="handleOpenDir"
       />
     </div>
   </div>
@@ -73,7 +103,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { getSoftwareList, uploadInstall, deleteSoftware, launchApp, cleanupDeadSoftware, generateSoftwareDescription } from '@/api'
+import { getSoftwareList, uploadInstall, deleteSoftware, launchApp, openDir, cleanupDeadSoftware, generateSoftwareDescription, batchDeleteSoftware } from '@/api'
 import type { Software } from '@/api'
 import SoftwareCard from '@/components/SoftwareCard.vue'
 
@@ -86,6 +116,10 @@ const uploadProgress = ref(0)
 const uploadMessage = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 
+// 多选状态
+const selectMode = ref(false)
+const selectedIds = ref<Set<string>>(new Set())
+
 // 批量生成状态
 const bulkGenerating = ref(false)
 const bulkProgress = ref(0)
@@ -94,6 +128,47 @@ const bulkTotal = ref(0)
 const itemsWithoutDescription = computed(() =>
   items.value.filter((s) => !s.description && !s.is_missing)
 )
+
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value
+  if (!selectMode.value) {
+    selectedIds.value = new Set()
+  }
+}
+
+function toggleSelect(id: string) {
+  const newSet = new Set(selectedIds.value)
+  if (newSet.has(id)) {
+    newSet.delete(id)
+  } else {
+    newSet.add(id)
+  }
+  selectedIds.value = newSet
+}
+
+function toggleSelectAll() {
+  if (selectedIds.value.size === items.value.length) {
+    selectedIds.value = new Set()
+  } else {
+    selectedIds.value = new Set(items.value.map((s) => s.id))
+  }
+}
+
+async function batchDelete() {
+  const count = selectedIds.value.size
+  if (count === 0) return
+  if (!confirm(`确定删除选中的 ${count} 条软件记录吗？（仅删除数据库记录，不删除本地文件）`)) return
+  try {
+    const ids = Array.from(selectedIds.value)
+    const { data } = await batchDeleteSoftware(ids)
+    alert(`已删除 ${data.deleted_count} 条记录`)
+    selectedIds.value = new Set()
+    selectMode.value = false
+    await loadList()
+  } catch {
+    alert('批量删除失败，请重试')
+  }
+}
 
 async function loadList() {
   loading.value = true
@@ -161,6 +236,15 @@ async function handleLaunch(path: string) {
     await launchApp(path)
   } catch (e: unknown) {
     const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '启动失败'
+    alert(detail)
+  }
+}
+
+async function handleOpenDir(path: string) {
+  try {
+    await openDir(path)
+  } catch (e: unknown) {
+    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '打开失败'
     alert(detail)
   }
 }

@@ -121,6 +121,10 @@ class GenerateDescriptionRequest(BaseModel):
     custom_prompt: str | None = Field(
         None, description="用户自定义提示词，为空则使用默认 prompt"
     )
+    mode: str = Field(
+        "append",
+        description="prompt 模式: append=追加到系统提示词后, override=覆盖系统提示词",
+    )
 
 
 class GenerateDescriptionResponse(BaseModel):

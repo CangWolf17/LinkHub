@@ -8,6 +8,7 @@
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import DIR_TYPE_WORKSPACE, filter_dirs_by_type, parse_allowed_dirs
 from app.core.database import get_db
-from app.core.llm_helpers import get_openai_client, load_llm_config
+from app.core.llm_helpers import get_async_openai_client, load_llm_config
 from app.models.models import PortableSoftware, SystemSetting, Workspace
 from app.schemas.metadata_schemas import (
     GenerateDescriptionRequest,
@@ -39,6 +40,63 @@ router = APIRouter(prefix="/api/metadata", tags=["Metadata CRUD"])
 
 
 # ── 内部工具函数 ─────────────────────────────────────────
+
+
+def _collect_dir_context(dir_path: Path, max_files: int = 30) -> str:
+    """
+    收集目录上下文信息供 LLM 推断软件/项目用途:
+      - 顶层文件列表（最多 max_files 个）
+      - README / LICENSE 等文件的前几行
+    """
+    if not dir_path.is_dir():
+        return ""
+
+    lines: list[str] = []
+
+    # 收集一级文件/目录列表
+    try:
+        entries = sorted(
+            dir_path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())
+        )
+        file_list = []
+        for entry in entries[:max_files]:
+            prefix = "[DIR]" if entry.is_dir() else f"[{entry.suffix or 'file'}]"
+            file_list.append(f"  {prefix} {entry.name}")
+        if len(entries) > max_files:
+            file_list.append(f"  ... 共 {len(entries)} 项")
+        if file_list:
+            lines.append("目录内容:")
+            lines.extend(file_list)
+    except OSError:
+        pass
+
+    # 尝试读取 README 等描述文件
+    readme_names = [
+        "README.md",
+        "README.txt",
+        "README",
+        "readme.md",
+        "readme.txt",
+        "DESCRIPTION",
+        "description.txt",
+        "package.json",
+        "setup.py",
+        "pyproject.toml",
+        "Cargo.toml",
+        "pom.xml",
+    ]
+    for name in readme_names:
+        readme_path = dir_path / name
+        if readme_path.is_file():
+            try:
+                content = readme_path.read_text(encoding="utf-8", errors="ignore")[:500]
+                lines.append(f"\n{name} 内容 (前500字):")
+                lines.append(content.strip())
+                break  # 只取第一个找到的
+            except OSError:
+                pass
+
+    return "\n".join(lines)
 
 
 def _check_path_missing(path_str: str) -> bool:
@@ -141,6 +199,36 @@ async def list_software(
         items=[_to_software_response(item) for item in items],
         total=total,
     )
+
+
+@router.post(
+    "/software/batch-delete",
+    summary="批量删除软件记录（仅数据库记录）",
+)
+async def batch_delete_software(
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """根据 ID 列表批量删除软件记录，不删除本地文件。"""
+    ids: list[str] = req.get("ids", [])
+    if not ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="ids 不能为空"
+        )
+
+    result = await db.execute(
+        select(PortableSoftware).where(PortableSoftware.id.in_(ids))
+    )
+    items = result.scalars().all()
+
+    deleted = []
+    for item in items:
+        deleted.append({"id": item.id, "name": item.name})
+        await db.delete(item)
+
+    await db.commit()
+    logger.info("批量删除软件: %d 条", len(deleted))
+    return {"deleted_count": len(deleted), "deleted": deleted}
 
 
 @router.delete(
@@ -282,7 +370,7 @@ async def generate_software_description(
 
     # 加载 LLM 配置
     config = await load_llm_config(db)
-    client = get_openai_client(config)
+    client = get_async_openai_client(config)
     model = config.get("model_chat", "").strip()
     if not model:
         raise HTTPException(
@@ -290,44 +378,112 @@ async def generate_software_description(
             detail="LLM 未配置: model_chat 为空。",
         )
 
-    # 构建 prompt
+    # 构建 prompt — 收集目录上下文丰富 LLM 输入
+    exe_path = Path(item.executable_path)
+    dir_context = _collect_dir_context(exe_path.parent)
+
     custom_prompt = req.custom_prompt if req and req.custom_prompt else None
+    prompt_mode = req.mode if req else "append"
+    context_block = f"\n\n目录文件信息:\n{dir_context}" if dir_context else ""
+
     if custom_prompt:
         user_content = (
             f"软件名称: {item.name}\n"
-            f"可执行文件路径: {item.executable_path}\n\n"
+            f"可执行文件路径: {item.executable_path}"
+            f"{context_block}\n\n"
             f"用户要求: {custom_prompt}"
         )
     else:
-        user_content = f"软件名称: {item.name}\n可执行文件路径: {item.executable_path}"
+        user_content = (
+            f"软件名称: {item.name}\n"
+            f"可执行文件路径: {item.executable_path}"
+            f"{context_block}"
+        )
 
-    system_prompt = (
-        "你是一个软件描述助手。根据提供的软件名称和路径信息，"
-        "生成一段简洁的中文描述（1-2句话），说明该软件的用途和特点。"
-        "只返回描述文本，不要附加任何解释、标点符号列表或前缀。"
+    system_prompt = config.get("llm_system_prompt_software", "").strip()
+    if not system_prompt:
+        system_prompt = (
+            "你是一个软件描述助手。根据提供的软件名称、路径和目录文件列表信息，"
+            "推断该软件的用途，生成一段简洁的中文描述（1-2句话），说明该软件的用途和特点。"
+            "只返回描述文本，不要附加任何解释、标点符号列表或前缀。"
+        )
+
+    # 根据 mode 处理自定义 prompt: override=覆盖 system_prompt, append=追加
+    if custom_prompt and prompt_mode == "override":
+        system_prompt = custom_prompt
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+    logger.info(
+        "[LLM-REQ] 软件描述生成 | model=%s | name=%s | user_content 长度=%d",
+        model,
+        item.name,
+        len(user_content),
     )
+    logger.debug("[LLM-REQ] system_prompt: %s", system_prompt)
+    logger.debug("[LLM-REQ] user_content: %s", user_content)
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
+            messages=messages,
             temperature=0.7,
-            max_tokens=200,
+            max_tokens=1024,
         )
+
+        # 详细记录 LLM 响应便于排查
+        raw = (
+            response.model_dump() if hasattr(response, "model_dump") else str(response)
+        )
+        logger.info(
+            "[LLM-RES] 软件描述 | model=%s | choices=%d | finish_reason=%s",
+            getattr(response, "model", model),
+            len(response.choices) if response.choices else 0,
+            response.choices[0].finish_reason if response.choices else "N/A",
+        )
+        logger.debug("[LLM-RES] raw_response: %s", raw)
 
         description = ""
         if response.choices:
-            description = (response.choices[0].message.content or "").strip()
+            msg = response.choices[0].message
+            description = (msg.content or "").strip()
+            # 推理模型 (如 GLM-4, DeepSeek-R1) 可能将内容放在 reasoning_content 中
+            if not description:
+                reasoning = getattr(msg, "reasoning_content", None) or ""
+                if reasoning:
+                    logger.info(
+                        "[LLM-FALLBACK] 软件描述 | content 为空，尝试从 reasoning_content 提取 | reasoning 长度=%d",
+                        len(reasoning),
+                    )
+                    # reasoning_content 是思维链，取最后一段作为结果的近似值
+                    # 但更好的做法是提示用户模型输出异常
+                    description = ""
 
         if not description:
+            logger.warning(
+                "[LLM-EMPTY] 软件描述 | name=%s | finish_reason=%s | choices=%s",
+                item.name,
+                response.choices[0].finish_reason if response.choices else "N/A",
+                raw,
+            )
+            hint = ""
+            if response.choices and response.choices[0].finish_reason == "length":
+                hint = "（模型输出被截断，可能是推理模型消耗了所有 token，建议更换非推理模型或增大 token 限制）"
+            reasoning_preview = ""
+            if response.choices:
+                rc = (
+                    getattr(response.choices[0].message, "reasoning_content", None)
+                    or ""
+                )
+                if rc:
+                    reasoning_preview = f" | reasoning_content 前200字: {rc[:200]}"
             return GenerateDescriptionResponse(
                 success=False,
                 description="",
                 model=model,
-                message="LLM 返回了空内容",
+                message=f"LLM 返回了空内容{hint}{reasoning_preview}",
             )
 
         # 保存到数据库
@@ -348,10 +504,10 @@ async def generate_software_description(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("LLM 生成软件描述失败: %s -> %s", item.name, e)
+        logger.error("LLM 生成软件描述失败: %s -> %s", item.name, e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM 调用失败，请检查配置和网络连接。",
+            detail=f"LLM 调用失败: {e}",
         )
 
 
@@ -423,6 +579,72 @@ async def list_workspaces(
 
 
 # ── 工作区静态路由（必须在 {workspace_id} 之前注册） ──────
+
+
+@router.post(
+    "/workspaces/batch-delete",
+    summary="批量删除工作区记录（仅数据库记录）",
+)
+async def batch_delete_workspaces(
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """根据 ID 列表批量删除工作区记录，不删除本地文件。"""
+    ids: list[str] = req.get("ids", [])
+    if not ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="ids 不能为空"
+        )
+
+    result = await db.execute(select(Workspace).where(Workspace.id.in_(ids)))
+    items = result.scalars().all()
+
+    deleted = []
+    for item in items:
+        deleted.append({"id": item.id, "name": item.name})
+        await db.delete(item)
+
+    await db.commit()
+    logger.info("批量删除工作区: %d 条", len(deleted))
+    return {"deleted_count": len(deleted), "deleted": deleted}
+
+
+@router.post(
+    "/workspaces/batch-update-status",
+    summary="批量更新工作区状态",
+)
+async def batch_update_workspace_status(
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """根据 ID 列表批量更新工作区状态。"""
+    ids: list[str] = req.get("ids", [])
+    new_status: str = req.get("status", "")
+    valid_statuses = {"not_started", "active", "completed", "archived"}
+
+    if not ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="ids 不能为空"
+        )
+    if new_status not in valid_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无效状态: {new_status}，允许值: {valid_statuses}",
+        )
+
+    result = await db.execute(select(Workspace).where(Workspace.id.in_(ids)))
+    items = result.scalars().all()
+
+    updated = []
+    now = datetime.now(timezone.utc)
+    for item in items:
+        item.status = new_status
+        item.updated_at = now
+        updated.append({"id": item.id, "name": item.name})
+
+    await db.commit()
+    logger.info("批量更新工作区状态 -> %s: %d 条", new_status, len(updated))
+    return {"updated_count": len(updated), "status": new_status, "updated": updated}
 
 
 @router.delete(
@@ -663,7 +885,7 @@ async def generate_workspace_description(
 
     # 加载 LLM 配置
     config = await load_llm_config(db)
-    client = get_openai_client(config)
+    client = get_async_openai_client(config)
     model = config.get("model_chat", "").strip()
     if not model:
         raise HTTPException(
@@ -671,13 +893,20 @@ async def generate_workspace_description(
             detail="LLM 未配置: model_chat 为空。",
         )
 
-    # 构建 prompt
+    # 构建 prompt — 收集目录上下文丰富 LLM 输入
+    ws_dir = Path(item.directory_path)
+    dir_context = _collect_dir_context(ws_dir)
+
     custom_prompt = req.custom_prompt if req and req.custom_prompt else None
+    prompt_mode = req.mode if req else "append"
+    context_block = f"\n\n目录文件信息:\n{dir_context}" if dir_context else ""
+
     if custom_prompt:
         user_content = (
             f"工作区名称: {item.name}\n"
             f"目录路径: {item.directory_path}\n"
-            f"当前状态: {item.status}\n\n"
+            f"当前状态: {item.status}"
+            f"{context_block}\n\n"
             f"用户要求: {custom_prompt}"
         )
     else:
@@ -685,35 +914,91 @@ async def generate_workspace_description(
             f"工作区名称: {item.name}\n"
             f"目录路径: {item.directory_path}\n"
             f"当前状态: {item.status}"
+            f"{context_block}"
         )
 
-    system_prompt = (
-        "你是一个项目描述助手。根据提供的工作区名称和目录路径信息，"
-        "推断该项目的性质，生成一段简洁的中文描述（1-2句话），说明该项目的用途和特点。"
-        "只返回描述文本，不要附加任何解释、标点符号列表或前缀。"
+    system_prompt = config.get("llm_system_prompt_workspace", "").strip()
+    if not system_prompt:
+        system_prompt = (
+            "你是一个项目描述助手。根据提供的工作区名称、目录路径和目录文件列表信息，"
+            "推断该项目的性质和技术栈，生成一段简洁的中文描述（1-2句话），说明该项目的用途和特点。"
+            "只返回描述文本，不要附加任何解释、标点符号列表或前缀。"
+        )
+
+    # 根据 mode 处理自定义 prompt: override=覆盖 system_prompt, append=追加
+    if custom_prompt and prompt_mode == "override":
+        system_prompt = custom_prompt
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+    logger.info(
+        "[LLM-REQ] 工作区描述生成 | model=%s | name=%s | user_content 长度=%d",
+        model,
+        item.name,
+        len(user_content),
     )
+    logger.debug("[LLM-REQ] system_prompt: %s", system_prompt)
+    logger.debug("[LLM-REQ] user_content: %s", user_content)
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
+            messages=messages,
             temperature=0.7,
-            max_tokens=200,
+            max_tokens=1024,
         )
+
+        # 详细记录 LLM 响应便于排查
+        raw = (
+            response.model_dump() if hasattr(response, "model_dump") else str(response)
+        )
+        logger.info(
+            "[LLM-RES] 工作区描述 | model=%s | choices=%d | finish_reason=%s",
+            getattr(response, "model", model),
+            len(response.choices) if response.choices else 0,
+            response.choices[0].finish_reason if response.choices else "N/A",
+        )
+        logger.debug("[LLM-RES] raw_response: %s", raw)
 
         description = ""
         if response.choices:
-            description = (response.choices[0].message.content or "").strip()
+            msg = response.choices[0].message
+            description = (msg.content or "").strip()
+            # 推理模型 (如 GLM-4, DeepSeek-R1) 可能将内容放在 reasoning_content 中
+            if not description:
+                reasoning = getattr(msg, "reasoning_content", None) or ""
+                if reasoning:
+                    logger.info(
+                        "[LLM-FALLBACK] 工作区描述 | content 为空，尝试从 reasoning_content 提取 | reasoning 长度=%d",
+                        len(reasoning),
+                    )
+                    description = ""
 
         if not description:
+            logger.warning(
+                "[LLM-EMPTY] 工作区描述 | name=%s | finish_reason=%s | choices=%s",
+                item.name,
+                response.choices[0].finish_reason if response.choices else "N/A",
+                raw,
+            )
+            hint = ""
+            if response.choices and response.choices[0].finish_reason == "length":
+                hint = "（模型输出被截断，可能是推理模型消耗了所有 token，建议更换非推理模型或增大 token 限制）"
+            reasoning_preview = ""
+            if response.choices:
+                rc = (
+                    getattr(response.choices[0].message, "reasoning_content", None)
+                    or ""
+                )
+                if rc:
+                    reasoning_preview = f" | reasoning_content 前200字: {rc[:200]}"
             return GenerateDescriptionResponse(
                 success=False,
                 description="",
                 model=model,
-                message="LLM 返回了空内容",
+                message=f"LLM 返回了空内容{hint}{reasoning_preview}",
             )
 
         # 保存到数据库
@@ -734,8 +1019,8 @@ async def generate_workspace_description(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("LLM 生成工作区描述失败: %s -> %s", item.name, e)
+        logger.error("LLM 生成工作区描述失败: %s -> %s", item.name, e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM 调用失败，请检查配置和网络连接。",
+            detail=f"LLM 调用失败: {e}",
         )

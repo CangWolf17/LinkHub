@@ -13,8 +13,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -224,3 +226,107 @@ async def open_directory(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"打开目录失败: {e}",
         )
+
+
+# ── 目录浏览端点（文件夹选择器） ─────────────────────────
+
+
+class BrowseDirRequest(BaseModel):
+    """目录浏览请求"""
+
+    path: Optional[str] = Field(
+        None,
+        description="要浏览的目录绝对路径，为空时返回驱动器列表（Windows）",
+    )
+
+
+class DirItem(BaseModel):
+    """单条目录项"""
+
+    name: str
+    path: str
+    is_dir: bool = True
+
+
+class BrowseDirResponse(BaseModel):
+    """目录浏览响应"""
+
+    current: str
+    parent: Optional[str] = None
+    items: list[DirItem]
+
+
+@router.post(
+    "/browse-dir",
+    response_model=BrowseDirResponse,
+    summary="浏览本地目录（文件夹选择器）",
+)
+async def browse_directory(req: BrowseDirRequest):
+    """
+    列出指定目录下的子目录（不列出文件）。
+    当 path 为空/null 时，Windows 下返回驱动器列表。
+    此端点不受白名单限制（因为用户就是在选择要添加的白名单目录）。
+    """
+    # 如果没有指定路径，返回驱动器列表（Windows）
+    if not req.path or not req.path.strip():
+        if sys.platform == "win32":
+            drives: list[DirItem] = []
+            # 遍历 A-Z 盘符
+            for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                drive = f"{letter}:\\"
+                if os.path.isdir(drive):
+                    drives.append(DirItem(name=f"{letter}:", path=drive))
+            return BrowseDirResponse(current="", parent=None, items=drives)
+        else:
+            # Linux/macOS: 返回根目录
+            return BrowseDirResponse(
+                current="/",
+                parent=None,
+                items=[
+                    DirItem(name=d, path=f"/{d}")
+                    for d in sorted(os.listdir("/"))
+                    if os.path.isdir(f"/{d}")
+                ],
+            )
+
+    raw = req.path.strip()
+
+    # 路径安全检查
+    if ".." in raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="路径中不允许包含 '..'",
+        )
+
+    target = Path(raw)
+    if not target.is_absolute():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="必须提供绝对路径",
+        )
+
+    resolved = target.resolve()
+    if not resolved.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"目录不存在: {resolved}",
+        )
+
+    # 获取父目录
+    parent = str(resolved.parent) if resolved.parent != resolved else None
+
+    # 列出子目录
+    items: list[DirItem] = []
+    try:
+        for entry in sorted(resolved.iterdir(), key=lambda e: e.name.lower()):
+            if entry.is_dir() and not entry.name.startswith("."):
+                items.append(DirItem(name=entry.name, path=str(entry)))
+    except PermissionError:
+        logger.warning("无权限访问目录: %s", resolved)
+        # 返回空列表但不报错，让用户知道这个目录不可访问
+
+    return BrowseDirResponse(
+        current=str(resolved),
+        parent=parent,
+        items=items,
+    )

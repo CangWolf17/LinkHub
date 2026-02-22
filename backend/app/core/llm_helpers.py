@@ -19,7 +19,14 @@ logger = logging.getLogger(__name__)
 
 async def load_llm_config(db: AsyncSession) -> dict[str, str]:
     """从 system_settings 表动态加载 LLM 相关配置，自动解密 llm_api_key。"""
-    keys = ["llm_base_url", "llm_api_key", "model_chat", "model_embedding"]
+    keys = [
+        "llm_base_url",
+        "llm_api_key",
+        "model_chat",
+        "model_embedding",
+        "llm_system_prompt_software",
+        "llm_system_prompt_workspace",
+    ]
     result = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(keys)))
     settings = {row.key: row.value for row in result.scalars().all()}
 
@@ -30,19 +37,8 @@ async def load_llm_config(db: AsyncSession) -> dict[str, str]:
     return settings
 
 
-def get_openai_client(config: dict[str, str]):
-    """
-    根据配置动态创建 OpenAI 兼容 Client。
-    使用延迟导入以避免未安装 openai 时的启动错误。
-    """
-    try:
-        from openai import OpenAI
-    except ImportError:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="openai 库未安装，请执行: pip install openai",
-        )
-
+def _validate_llm_config(config: dict[str, str]):
+    """校验 LLM 配置项，缺失时抛出 HTTPException。"""
     base_url = config.get("llm_base_url", "").strip()
     api_key = config.get("llm_api_key", "").strip()
 
@@ -56,5 +52,38 @@ def get_openai_client(config: dict[str, str]):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="LLM 未配置: llm_api_key 为空。请先在设置中配置 API 密钥。",
         )
+    return base_url, api_key
 
+
+def get_openai_client(config: dict[str, str]):
+    """
+    根据配置动态创建 OpenAI 兼容 Client（同步版本，已弃用，保留向后兼容）。
+    新代码应使用 get_async_openai_client()。
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="openai 库未安装，请执行: pip install openai",
+        )
+
+    base_url, api_key = _validate_llm_config(config)
     return OpenAI(base_url=base_url, api_key=api_key)
+
+
+def get_async_openai_client(config: dict[str, str]):
+    """
+    根据配置动态创建 AsyncOpenAI 兼容 Client（异步版本）。
+    不会阻塞事件循环，推荐在 FastAPI 端点中使用。
+    """
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="openai 库未安装，请执行: pip install openai",
+        )
+
+    base_url, api_key = _validate_llm_config(config)
+    return AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=60.0)

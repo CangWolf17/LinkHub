@@ -68,6 +68,16 @@
               />
               <button
                 type="button"
+                class="p-2 text-gray-400 hover:text-blue-500 transition-colors"
+                @click="openFolderPicker(i)"
+                title="浏览..."
+              >
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+              </button>
+              <button
+                type="button"
                 class="p-2 text-gray-400 hover:text-red-500 transition-colors"
                 @click="removeDir(i)"
                 title="移除"
@@ -264,6 +274,14 @@
       </div>
     </div>
   </Teleport>
+
+  <!-- 文件夹选择器弹窗 -->
+  <FolderPickerDialog
+    v-if="folderPickerIndex !== null"
+    :initial-path="dirs[folderPickerIndex]?.path"
+    @confirm="onFolderPicked"
+    @cancel="folderPickerIndex = null"
+  />
 </template>
 
 <script setup lang="ts">
@@ -275,6 +293,7 @@ import {
   scanAndImportWorkspaces,
 } from '@/api'
 import type { DirEntry } from '@/api'
+import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
 
 const emit = defineEmits<{ (e: 'done'): void }>()
 
@@ -294,6 +313,20 @@ function addDir() {
 function removeDir(i: number) {
   dirs.value.splice(i, 1)
   if (dirs.value.length === 0) dirs.value.push({ path: '', type: 'software' })
+}
+
+// 文件夹选择器
+const folderPickerIndex = ref<number | null>(null)
+
+function openFolderPicker(i: number) {
+  folderPickerIndex.value = i
+}
+
+function onFolderPicked(path: string) {
+  if (folderPickerIndex.value !== null && folderPickerIndex.value < dirs.value.length) {
+    dirs.value[folderPickerIndex.value].path = path
+  }
+  folderPickerIndex.value = null
 }
 
 async function submitStep1() {

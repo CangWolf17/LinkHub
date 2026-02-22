@@ -35,6 +35,8 @@ export interface LlmConfig {
   has_api_key: boolean
   model_chat: string
   model_embedding: string
+  llm_system_prompt_software: string
+  llm_system_prompt_workspace: string
 }
 
 export interface SearchResultItem {
@@ -57,6 +59,18 @@ export interface SearchResponse {
 export interface DirEntry {
   path: string
   type: 'software' | 'workspace'
+}
+
+export interface DirItem {
+  name: string
+  path: string
+  is_dir: boolean
+}
+
+export interface BrowseDirResponse {
+  current: string
+  parent: string | null
+  items: DirItem[]
 }
 
 export interface InstallerUploadResponse {
@@ -131,10 +145,16 @@ export const deleteSoftware = (id: string) =>
 export const cleanupDeadSoftware = () =>
   http.delete<{ removed_count: number }>('/metadata/software/cleanup/dead-links')
 
-export const generateSoftwareDescription = (id: string, customPrompt?: string) =>
+export const batchDeleteSoftware = (ids: string[]) =>
+  http.post<{ deleted_count: number; deleted: Array<{ id: string; name: string }> }>(
+    '/metadata/software/batch-delete',
+    { ids }
+  )
+
+export const generateSoftwareDescription = (id: string, customPrompt?: string, mode?: 'append' | 'override') =>
   http.post<{ success: boolean; description: string; model: string; message: string }>(
     `/metadata/software/${id}/generate-description`,
-    customPrompt ? { custom_prompt: customPrompt } : {}
+    customPrompt ? { custom_prompt: customPrompt, mode: mode || 'append' } : {}
   )
 
 // ── Workspaces (Module B) ────────────────────────────────
@@ -157,10 +177,22 @@ export const deleteWorkspace = (id: string) =>
 export const cleanupDeadWorkspaces = () =>
   http.delete<{ removed_count: number }>('/metadata/workspaces/cleanup/dead-links')
 
-export const generateWorkspaceDescription = (id: string, customPrompt?: string) =>
+export const batchDeleteWorkspaces = (ids: string[]) =>
+  http.post<{ deleted_count: number; deleted: Array<{ id: string; name: string }> }>(
+    '/metadata/workspaces/batch-delete',
+    { ids }
+  )
+
+export const batchUpdateWorkspaceStatus = (ids: string[], status: string) =>
+  http.post<{ updated_count: number; status: string; updated: Array<{ id: string; name: string }> }>(
+    '/metadata/workspaces/batch-update-status',
+    { ids, status }
+  )
+
+export const generateWorkspaceDescription = (id: string, customPrompt?: string, mode?: 'append' | 'override') =>
   http.post<{ success: boolean; description: string; model: string; message: string }>(
     `/metadata/workspaces/${id}/generate-description`,
-    customPrompt ? { custom_prompt: customPrompt } : {}
+    customPrompt ? { custom_prompt: customPrompt, mode: mode || 'append' } : {}
   )
 
 // ── LLM Gateway (Module C) ──────────────────────────────
@@ -212,3 +244,19 @@ export const launchApp = (targetPath: string) =>
 
 export const openDir = (targetPath: string) =>
   http.post('/os/open-dir', { target_path: targetPath })
+
+export const browseDir = (path?: string) =>
+  http.post<BrowseDirResponse>('/os/browse-dir', { path: path || null })
+
+// ── Logs ─────────────────────────────────────────────────
+
+export interface LogEntry {
+  id: number
+  timestamp: string
+  level: string
+  logger: string
+  message: string
+}
+
+export const getLogs = (limit = 200) =>
+  http.get<{ logs: LogEntry[] }>('/logs', { params: { limit } })

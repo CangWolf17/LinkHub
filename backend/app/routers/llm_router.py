@@ -17,7 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import encrypt_value
 from app.core.database import get_db
-from app.core.llm_helpers import get_openai_client, load_llm_config
+from app.core.llm_helpers import (
+    get_async_openai_client,
+    load_llm_config,
+)
 from app.models.models import SystemSetting
 from app.schemas.llm_schemas import (
     ChatRequest,
@@ -54,6 +57,8 @@ async def get_llm_config(
         has_api_key=bool(config.get("llm_api_key", "").strip()),
         model_chat=config.get("model_chat", ""),
         model_embedding=config.get("model_embedding", ""),
+        llm_system_prompt_software=config.get("llm_system_prompt_software", ""),
+        llm_system_prompt_workspace=config.get("llm_system_prompt_workspace", ""),
     )
 
 
@@ -92,6 +97,8 @@ async def update_llm_config(
         has_api_key=bool(config.get("llm_api_key", "").strip()),
         model_chat=config.get("model_chat", ""),
         model_embedding=config.get("model_embedding", ""),
+        llm_system_prompt_software=config.get("llm_system_prompt_software", ""),
+        llm_system_prompt_workspace=config.get("llm_system_prompt_workspace", ""),
     )
 
 
@@ -106,7 +113,7 @@ async def test_llm_connection(
     config = await load_llm_config(db)
 
     try:
-        client = get_openai_client(config)
+        client = get_async_openai_client(config)
     except HTTPException:
         raise
 
@@ -118,7 +125,7 @@ async def test_llm_connection(
         )
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": "Hi, reply with 'OK' only."}],
             max_tokens=5,
@@ -135,7 +142,7 @@ async def test_llm_connection(
         logger.error("LLM 连接测试失败: %s", e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM 连接失败，请检查 base_url、API Key 和网络连接。",
+            detail=f"LLM 连接失败: {e}",
         )
 
 
@@ -157,7 +164,7 @@ async def chat(
     使用 system_settings 中的 model_chat 配置。
     """
     config = await load_llm_config(db)
-    client = get_openai_client(config)
+    client = get_async_openai_client(config)
 
     model = config.get("model_chat", "").strip()
     if not model:
@@ -177,7 +184,7 @@ async def chat(
         if req.max_tokens is not None:
             kwargs["max_tokens"] = req.max_tokens
 
-        response = client.chat.completions.create(**kwargs)
+        response = await client.chat.completions.create(**kwargs)
 
         # 构建 raw_response
         raw = (
@@ -231,7 +238,7 @@ async def embed(
     使用 system_settings 中的 model_embedding 配置。
     """
     config = await load_llm_config(db)
-    client = get_openai_client(config)
+    client = get_async_openai_client(config)
 
     model = config.get("model_embedding", "").strip()
     if not model:
@@ -241,7 +248,7 @@ async def embed(
         )
 
     try:
-        response = client.embeddings.create(
+        response = await client.embeddings.create(
             model=model,
             input=req.texts,
         )
@@ -286,7 +293,7 @@ async def extract(
     通过 system prompt 引导模型返回 JSON 格式输出。
     """
     config = await load_llm_config(db)
-    client = get_openai_client(config)
+    client = get_async_openai_client(config)
 
     model = config.get("model_chat", "").strip()
     if not model:
@@ -310,7 +317,7 @@ async def extract(
     ]
 
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=req.temperature,

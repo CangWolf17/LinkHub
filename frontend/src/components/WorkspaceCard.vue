@@ -7,6 +7,14 @@
       <!-- 标题行 -->
       <div class="flex items-start justify-between gap-2 mb-2">
         <div class="flex items-center gap-2 min-w-0 flex-1">
+          <!-- 多选复选框 -->
+          <input
+            v-if="selectable"
+            type="checkbox"
+            :checked="selected"
+            class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
+            @change="$emit('toggle-select', workspace.id)"
+          />
           <span class="text-lg flex-shrink-0">{{ statusIcon }}</span>
           <h3
             class="text-sm font-semibold truncate"
@@ -97,12 +105,15 @@ import type { Workspace } from '@/api'
 
 const props = defineProps<{
   workspace: Workspace
+  selectable?: boolean
+  selected?: boolean
 }>()
 
 defineEmits<{
   openDir: [path: string]
   edit: [workspace: Workspace]
   delete: [id: string]
+  'toggle-select': [id: string]
 }>()
 
 const statusIcon = computed(() => {

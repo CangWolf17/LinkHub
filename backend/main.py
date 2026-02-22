@@ -4,11 +4,13 @@ LinkHub - Local Smart Dashboard
 服务强制绑定 127.0.0.1，仅供本机浏览器访问。
 """
 
+import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
@@ -20,6 +22,7 @@ from app.core.config import (
 )
 from app.core.crypto import encrypt_value, is_encrypted
 from app.core.database import async_session_factory, engine
+from app.core.log_buffer import BufferHandler, log_broadcaster, log_buffer
 from app.core.vector_store import get_chroma_client, shutdown_chroma
 from app.models.models import Base, SystemSetting
 from app.routers import (
@@ -37,6 +40,16 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
     datefmt="%H:%M:%S",
 )
+
+# 添加 BufferHandler 到根 logger，捕获所有日志供 WebSocket 推送
+_buffer_handler = BufferHandler()
+_buffer_handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s", datefmt="%H:%M:%S"
+    )
+)
+logging.getLogger().addHandler(_buffer_handler)
+
 logger = logging.getLogger("linkhub")
 
 
@@ -51,6 +64,16 @@ async def _seed_default_settings():
         "llm_api_key": "",
         "model_chat": "",
         "model_embedding": "",
+        "llm_system_prompt_software": (
+            "你是一个软件描述助手。根据提供的软件名称、路径和目录文件列表信息，"
+            "推断该软件的用途，生成一段简洁的中文描述（1-2句话），说明该软件的用途和特点。"
+            "只返回描述文本，不要附加任何解释、标点符号列表或前缀。"
+        ),
+        "llm_system_prompt_workspace": (
+            "你是一个项目描述助手。根据提供的工作区名称、目录路径和目录文件列表信息，"
+            "推断该项目的性质和技术栈，生成一段简洁的中文描述（1-2句话），说明该项目的用途和特点。"
+            "只返回描述文本，不要附加任何解释、标点符号列表或前缀。"
+        ),
     }
 
     async with async_session_factory() as session:
@@ -157,6 +180,30 @@ app.include_router(search_router.router)
 async def health_check():
     """服务健康检查端点"""
     return {"status": "ok", "service": "LinkHub"}
+
+
+# ── 日志端点 ──────────────────────────────────────────────
+
+
+@app.get("/api/logs", tags=["Logs"])
+async def get_logs(limit: int = 200):
+    """获取最近的日志记录（HTTP 轮询备用）"""
+    return {"logs": log_buffer.get_recent(limit)}
+
+
+@app.websocket("/api/ws/logs")
+async def ws_logs(websocket: WebSocket):
+    """WebSocket 实时日志推送"""
+    await websocket.accept()
+    queue = log_broadcaster.subscribe()
+    try:
+        while True:
+            record = await queue.get()
+            await websocket.send_text(json.dumps(record, ensure_ascii=False))
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        log_broadcaster.unsubscribe(queue)
 
 
 # ── 启动入口 ──────────────────────────────────────────────

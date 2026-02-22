@@ -28,6 +28,16 @@
           />
           <button
             type="button"
+            class="p-2 text-gray-400 hover:text-blue-500 transition-colors"
+            @click="openFolderPicker(i)"
+            title="浏览..."
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+          </button>
+          <button
+            type="button"
             class="p-2 text-gray-400 hover:text-red-500 transition-colors"
             @click="removeAllowedDir(i)"
             title="移除"
@@ -126,6 +136,34 @@
           type="text"
           placeholder="例: text-embedding-ada-002 / nomic-embed-text"
           class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+      </div>
+
+      <!-- System Prompt: 软件描述 -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          软件描述 System Prompt
+          <span class="text-xs text-gray-400 font-normal ml-1">AI 生成软件描述时使用的系统提示词</span>
+        </label>
+        <textarea
+          v-model="form.llm_system_prompt_software"
+          rows="3"
+          placeholder="留空则使用内置默认 prompt"
+          class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
+        />
+      </div>
+
+      <!-- System Prompt: 工作区描述 -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          工作区描述 System Prompt
+          <span class="text-xs text-gray-400 font-normal ml-1">AI 生成工作区描述时使用的系统提示词</span>
+        </label>
+        <textarea
+          v-model="form.llm_system_prompt_workspace"
+          rows="3"
+          placeholder="留空则使用内置默认 prompt"
+          class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
         />
       </div>
 
@@ -253,6 +291,14 @@
         </div>
       </div>
     </div>
+
+    <!-- 文件夹选择器弹窗 -->
+    <FolderPickerDialog
+      v-if="folderPickerIndex !== null"
+      :initial-path="allowedDirs[folderPickerIndex]?.path"
+      @confirm="onFolderPicked"
+      @cancel="folderPickerIndex = null"
+    />
   </div>
 </template>
 
@@ -260,6 +306,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { getLlmConfig, updateLlmConfig, testLlmConnection, getIndexStats, reindexAll, scanAndImportSoftware, scanAndImportWorkspaces, getAllowedDirs, updateAllowedDirs } from '@/api'
 import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse, DirEntry } from '@/api'
+import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
 
 // ── 白名单目录管理 ─────────────────────────────────────
 const allowedDirs = ref<DirEntry[]>([{ path: '', type: 'software' }])
@@ -281,6 +328,20 @@ function addAllowedDir() {
 function removeAllowedDir(i: number) {
   allowedDirs.value.splice(i, 1)
   if (allowedDirs.value.length === 0) allowedDirs.value.push({ path: '', type: 'software' })
+}
+
+// 文件夹选择器
+const folderPickerIndex = ref<number | null>(null)
+
+function openFolderPicker(i: number) {
+  folderPickerIndex.value = i
+}
+
+function onFolderPicked(path: string) {
+  if (folderPickerIndex.value !== null && folderPickerIndex.value < allowedDirs.value.length) {
+    allowedDirs.value[folderPickerIndex.value].path = path
+  }
+  folderPickerIndex.value = null
 }
 
 async function saveAllowedDirs() {
@@ -314,6 +375,8 @@ const form = reactive({
   llm_api_key: '',
   model_chat: '',
   model_embedding: '',
+  llm_system_prompt_software: '',
+  llm_system_prompt_workspace: '',
 })
 const showKey = ref(false)
 const saving = ref(false)
@@ -344,6 +407,8 @@ async function loadConfig() {
     form.llm_api_key = '' // 不回显 key
     form.model_chat = data.model_chat
     form.model_embedding = data.model_embedding
+    form.llm_system_prompt_software = data.llm_system_prompt_software || ''
+    form.llm_system_prompt_workspace = data.llm_system_prompt_workspace || ''
   } catch {
     showMsg('加载配置失败', 'error')
   }
@@ -366,6 +431,9 @@ async function saveConfig() {
     if (form.llm_api_key) payload.llm_api_key = form.llm_api_key
     if (form.model_chat) payload.model_chat = form.model_chat
     if (form.model_embedding) payload.model_embedding = form.model_embedding
+    // system prompt 允许清空（传空字符串恢复默认）
+    if (form.llm_system_prompt_software !== undefined) payload.llm_system_prompt_software = form.llm_system_prompt_software
+    if (form.llm_system_prompt_workspace !== undefined) payload.llm_system_prompt_workspace = form.llm_system_prompt_workspace
 
     await updateLlmConfig(payload)
     showMsg('配置已保存', 'success')

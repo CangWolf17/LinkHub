@@ -9,6 +9,14 @@
         <!-- 标题行 -->
         <div class="flex items-start justify-between gap-2 mb-2">
           <div class="flex items-center gap-2 min-w-0 flex-1">
+            <!-- 多选复选框 -->
+            <input
+              v-if="selectable"
+              type="checkbox"
+              :checked="selected"
+              class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
+              @change="$emit('toggle-select', software.id)"
+            />
             <span class="text-lg flex-shrink-0">
               {{ software.is_missing ? '⚠️' : '📦' }}
             </span>
@@ -105,6 +113,16 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
                 </svg>
               </button>
+              <button
+                v-if="!software.is_missing && software.executable_path"
+                class="p-1 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                title="打开所在文件夹"
+                @click="$emit('open-dir', parentDir)"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+                </svg>
+              </button>
             </div>
           </div>
         </div>
@@ -134,21 +152,33 @@
       </div>
     </div>
   </div>
+
+  <!-- AI Prompt 弹窗 -->
+  <AiPromptDialog
+    v-if="showAiDialog"
+    @cancel="showAiDialog = false"
+    @confirm="doGenerate"
+  />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
 import type { Software } from '@/api'
 import { generateSoftwareDescription, updateSoftware } from '@/api'
+import AiPromptDialog from '@/components/AiPromptDialog.vue'
 
 const props = defineProps<{
   software: Software
+  selectable?: boolean
+  selected?: boolean
 }>()
 
 const emit = defineEmits<{
   launch: [path: string]
   delete: [id: string]
   updated: [software: Software]
+  'toggle-select': [id: string]
+  'open-dir': [path: string]
 }>()
 
 // 描述编辑状态
@@ -158,6 +188,16 @@ const editTextarea = ref<HTMLTextAreaElement | null>(null)
 
 // LLM 生成状态
 const generating = ref(false)
+const showAiDialog = ref(false)
+
+const parentDir = computed(() => {
+  if (!props.software.executable_path) return ''
+  // Windows paths use backslash; take parent directory of the exe
+  const sep = props.software.executable_path.includes('\\') ? '\\' : '/'
+  const parts = props.software.executable_path.split(sep)
+  parts.pop() // remove filename
+  return parts.join(sep)
+})
 
 const parsedTags = computed(() => {
   if (!props.software.tags) return []
@@ -194,9 +234,18 @@ async function saveEdit() {
 
 async function handleGenerate() {
   if (generating.value) return
+  showAiDialog.value = true
+}
+
+async function doGenerate(payload: { customPrompt: string; mode: 'append' | 'override' }) {
+  showAiDialog.value = false
   generating.value = true
   try {
-    const { data } = await generateSoftwareDescription(props.software.id)
+    const { data } = await generateSoftwareDescription(
+      props.software.id,
+      payload.customPrompt || undefined,
+      payload.mode,
+    )
     if (data.success) {
       emit('updated', { ...props.software, description: data.description })
     } else {

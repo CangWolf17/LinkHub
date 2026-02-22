@@ -86,6 +86,7 @@ const { state: _llmState, ...llmMonitor } = useLlmMonitor()
 const navItems = [
   { path: '/software', label: '软件舱', icon: '📦' },
   { path: '/workspaces', label: '工作区', icon: '📂' },
+  { path: '/logs', label: '日志', icon: '📋' },
   { path: '/settings', label: '设置', icon: '⚙️' },
 ]
 

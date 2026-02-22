@@ -21,12 +21,24 @@
         <!-- 目录路径 -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">目录路径</label>
-          <input
-            v-model="form.directory_path"
-            type="text"
-            placeholder="例: C:\Projects\MyProject"
-            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
-          />
+          <div class="flex items-center gap-2">
+            <input
+              v-model="form.directory_path"
+              type="text"
+              placeholder="例: C:\Projects\MyProject"
+              class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono"
+            />
+            <button
+              type="button"
+              class="p-2 text-gray-400 hover:text-blue-500 transition-colors shrink-0"
+              @click="showFolderPicker = true"
+              title="浏览..."
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <!-- 描述 -->
@@ -100,12 +112,29 @@
       </div>
     </div>
   </div>
+
+  <!-- 文件夹选择器弹窗 -->
+  <FolderPickerDialog
+    v-if="showFolderPicker"
+    :initial-path="form.directory_path"
+    @confirm="onFolderPicked"
+    @cancel="showFolderPicker = false"
+  />
+
+  <!-- AI Prompt 弹窗 -->
+  <AiPromptDialog
+    v-if="showAiDialog"
+    @cancel="showAiDialog = false"
+    @confirm="doGenerateDescription"
+  />
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { createWorkspace, updateWorkspace, generateWorkspaceDescription } from '@/api'
 import type { Workspace } from '@/api'
+import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
+import AiPromptDialog from '@/components/AiPromptDialog.vue'
 
 const props = defineProps<{
   workspace: Workspace | null
@@ -129,6 +158,13 @@ const form = reactive({
 const saving = ref(false)
 const error = ref('')
 const generatingDesc = ref(false)
+const showFolderPicker = ref(false)
+const showAiDialog = ref(false)
+
+function onFolderPicked(path: string) {
+  form.directory_path = path
+  showFolderPicker.value = false
+}
 
 onMounted(() => {
   if (props.workspace) {
@@ -144,10 +180,20 @@ onMounted(() => {
 
 async function handleGenerateDescription() {
   if (!props.workspace || generatingDesc.value) return
+  showAiDialog.value = true
+}
+
+async function doGenerateDescription(payload: { customPrompt: string; mode: 'append' | 'override' }) {
+  if (!props.workspace) return
+  showAiDialog.value = false
   generatingDesc.value = true
   error.value = ''
   try {
-    const { data } = await generateWorkspaceDescription(props.workspace.id)
+    const { data } = await generateWorkspaceDescription(
+      props.workspace.id,
+      payload.customPrompt || undefined,
+      payload.mode,
+    )
     if (data.success) {
       form.description = data.description
     } else {
