@@ -43,6 +43,18 @@ def run_pyinstaller(variant: str):
     name = "LinkHub" if variant == "full" else "LinkHub-lite"
     print(f"\n=== 打包 {variant} 版: {name}.exe ===")
 
+    # Conda 环境中 PyInstaller 找不到的 DLL（Windows 特有问题）
+    conda_lib_bin = Path(sys.prefix) / "Library" / "bin"
+    conda_dlls = [
+        "libexpat.dll",  # pyexpat 依赖
+        "libbz2.dll",  # _bz2 依赖
+        "ffi.dll",  # _ctypes 依赖
+        "sqlite3.dll",  # _sqlite3 依赖
+        "zstd.dll",  # zstandard 依赖
+        "libcrypto-3-x64.dll",  # ssl 依赖
+        "libssl-3-x64.dll",  # ssl 依赖
+    ]
+
     # 基础参数
     cmd = [
         PYTHON,
@@ -68,6 +80,14 @@ def run_pyinstaller(variant: str):
         "--noconsole",
         # 图标（如果有的话）
     ]
+
+    # 添加 Conda 环境中缺失的 DLL
+    for dll_name in conda_dlls:
+        dll_path = conda_lib_bin / dll_name
+        if dll_path.is_file():
+            cmd.extend(["--add-binary", f"{dll_path};."])
+        else:
+            print(f"  警告: DLL 未找到，跳过: {dll_path}")
 
     # hidden imports - 所有版本都需要的
     hidden = [

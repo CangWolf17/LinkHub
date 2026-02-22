@@ -72,7 +72,9 @@ coverage
 credentials.json
 
 # LinkHub runtime data (SQLite DB, ChromaDB, server logs)
+backend/data/
 backend/app/data/
+backend/logs/
 backend/*.log
 backend/uploads/
 
