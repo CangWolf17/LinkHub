@@ -7,7 +7,9 @@ LinkHub - Local Smart Dashboard
 import asyncio
 import json
 import logging
+import logging.handlers
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -35,20 +37,42 @@ from app.routers import (
 )
 
 # ── 日志配置 ──────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
-    datefmt="%H:%M:%S",
-)
 
-# 添加 BufferHandler 到根 logger，捕获所有日志供 WebSocket 推送
-_buffer_handler = BufferHandler()
-_buffer_handler.setFormatter(
-    logging.Formatter(
-        "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s", datefmt="%H:%M:%S"
+_LOG_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
+_LOG_DATEFMT = "%H:%M:%S"
+_LOG_DIR = Path(__file__).parent / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+
+# 防止 uvicorn reload 模式重复添加 handler
+if not any(isinstance(h, BufferHandler) for h in root_logger.handlers):
+    _formatter = logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT)
+
+    # 控制台 handler
+    _console = logging.StreamHandler()
+    _console.setFormatter(_formatter)
+    root_logger.addHandler(_console)
+
+    # 内存缓冲 handler（供 WebSocket 推送）
+    _buffer_handler = BufferHandler()
+    _buffer_handler.setFormatter(_formatter)
+    root_logger.addHandler(_buffer_handler)
+
+    # 文件 handler: 按大小轮转，单文件最大 5MB，保留 3 个备份（共约 20MB）
+    _file_formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
-)
-logging.getLogger().addHandler(_buffer_handler)
+    _file_handler = logging.handlers.RotatingFileHandler(
+        filename=_LOG_DIR / "linkhub.log",
+        maxBytes=5 * 1024 * 1024,  # 5 MB
+        backupCount=3,
+        encoding="utf-8",
+    )
+    _file_handler.setFormatter(_file_formatter)
+    root_logger.addHandler(_file_handler)
 
 logger = logging.getLogger("linkhub")
 
@@ -64,6 +88,7 @@ async def _seed_default_settings():
         "llm_api_key": "",
         "model_chat": "",
         "model_embedding": "",
+        "llm_max_tokens": "1024",
         "llm_system_prompt_software": (
             "你是一个软件描述助手。根据提供的软件名称、路径和目录文件列表信息，"
             "推断该软件的用途，生成一段简洁的中文描述（1-2句话），说明该软件的用途和特点。"

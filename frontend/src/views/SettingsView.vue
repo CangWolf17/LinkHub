@@ -139,6 +139,23 @@
         />
       </div>
 
+      <!-- Max Tokens -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          Max Tokens
+          <span class="text-xs text-gray-400 font-normal ml-1">AI 生成描述时的最大 token 数（推理模型建议 2048+）</span>
+        </label>
+        <input
+          v-model.number="form.llm_max_tokens"
+          type="number"
+          min="64"
+          max="32768"
+          step="64"
+          placeholder="1024"
+          class="w-48 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+      </div>
+
       <!-- System Prompt: 软件描述 -->
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">
@@ -375,6 +392,7 @@ const form = reactive({
   llm_api_key: '',
   model_chat: '',
   model_embedding: '',
+  llm_max_tokens: 1024,
   llm_system_prompt_software: '',
   llm_system_prompt_workspace: '',
 })
@@ -407,6 +425,7 @@ async function loadConfig() {
     form.llm_api_key = '' // 不回显 key
     form.model_chat = data.model_chat
     form.model_embedding = data.model_embedding
+    form.llm_max_tokens = data.llm_max_tokens ?? 1024
     form.llm_system_prompt_software = data.llm_system_prompt_software || ''
     form.llm_system_prompt_workspace = data.llm_system_prompt_workspace || ''
   } catch {
@@ -426,11 +445,12 @@ async function saveConfig() {
   saving.value = true
   message.value = ''
   try {
-    const payload: Record<string, string> = {}
+    const payload: Record<string, string | number> = {}
     if (form.llm_base_url) payload.llm_base_url = form.llm_base_url
     if (form.llm_api_key) payload.llm_api_key = form.llm_api_key
     if (form.model_chat) payload.model_chat = form.model_chat
     if (form.model_embedding) payload.model_embedding = form.model_embedding
+    payload.llm_max_tokens = form.llm_max_tokens
     // system prompt 允许清空（传空字符串恢复默认）
     if (form.llm_system_prompt_software !== undefined) payload.llm_system_prompt_software = form.llm_system_prompt_software
     if (form.llm_system_prompt_workspace !== undefined) payload.llm_system_prompt_workspace = form.llm_system_prompt_workspace

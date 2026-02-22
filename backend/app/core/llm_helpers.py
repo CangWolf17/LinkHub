@@ -24,6 +24,7 @@ async def load_llm_config(db: AsyncSession) -> dict[str, str]:
         "llm_api_key",
         "model_chat",
         "model_embedding",
+        "llm_max_tokens",
         "llm_system_prompt_software",
         "llm_system_prompt_workspace",
     ]

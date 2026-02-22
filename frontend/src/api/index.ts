@@ -35,6 +35,7 @@ export interface LlmConfig {
   has_api_key: boolean
   model_chat: string
   model_embedding: string
+  llm_max_tokens: number
   llm_system_prompt_software: string
   llm_system_prompt_workspace: string
 }

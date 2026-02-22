@@ -103,6 +103,7 @@ class LLMConfigResponse(BaseModel):
     has_api_key: bool = False
     model_chat: str = ""
     model_embedding: str = ""
+    llm_max_tokens: int = 1024
     llm_system_prompt_software: str = ""
     llm_system_prompt_workspace: str = ""
 
@@ -114,5 +115,6 @@ class LLMConfigUpdate(BaseModel):
     llm_api_key: str | None = None
     model_chat: str | None = None
     model_embedding: str | None = None
+    llm_max_tokens: int | None = None
     llm_system_prompt_software: str | None = None
     llm_system_prompt_workspace: str | None = None

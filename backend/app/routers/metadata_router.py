@@ -426,11 +426,12 @@ async def generate_software_description(
     logger.debug("[LLM-REQ] user_content: %s", user_content)
 
     try:
+        max_tokens = int(config.get("llm_max_tokens", "1024"))
         response = await client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=0.7,
-            max_tokens=1024,
+            max_tokens=max_tokens,
         )
 
         # 详细记录 LLM 响应便于排查
@@ -943,11 +944,12 @@ async def generate_workspace_description(
     logger.debug("[LLM-REQ] user_content: %s", user_content)
 
     try:
+        max_tokens = int(config.get("llm_max_tokens", "1024"))
         response = await client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=0.7,
-            max_tokens=1024,
+            max_tokens=max_tokens,
         )
 
         # 详细记录 LLM 响应便于排查

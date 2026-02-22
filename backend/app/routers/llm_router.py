@@ -57,6 +57,7 @@ async def get_llm_config(
         has_api_key=bool(config.get("llm_api_key", "").strip()),
         model_chat=config.get("model_chat", ""),
         model_embedding=config.get("model_embedding", ""),
+        llm_max_tokens=int(config.get("llm_max_tokens", "1024")),
         llm_system_prompt_software=config.get("llm_system_prompt_software", ""),
         llm_system_prompt_workspace=config.get("llm_system_prompt_workspace", ""),
     )
@@ -79,12 +80,15 @@ async def update_llm_config(
         if key == "llm_api_key" and value:
             value = encrypt_value(value)
 
+        # DB system_settings 所有 value 都是 str，pydantic 可能传入 int
+        db_value = str(value) if not isinstance(value, str) else value
+
         result = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
         setting = result.scalar_one_or_none()
         if setting:
-            setting.value = value
+            setting.value = db_value
         else:
-            db.add(SystemSetting(key=key, value=value))
+            db.add(SystemSetting(key=key, value=db_value))
 
     await db.flush()
     await db.commit()
@@ -97,6 +101,7 @@ async def update_llm_config(
         has_api_key=bool(config.get("llm_api_key", "").strip()),
         model_chat=config.get("model_chat", ""),
         model_embedding=config.get("model_embedding", ""),
+        llm_max_tokens=int(config.get("llm_max_tokens", "1024")),
         llm_system_prompt_software=config.get("llm_system_prompt_software", ""),
         llm_system_prompt_workspace=config.get("llm_system_prompt_workspace", ""),
     )
