@@ -170,7 +170,7 @@ function connectWs() {
   }
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = `${protocol}//127.0.0.1:8147/api/ws/logs`
+  const wsUrl = `${protocol}//${window.location.host}/api/ws/logs`
   ws = new WebSocket(wsUrl)
 
   ws.onopen = () => {

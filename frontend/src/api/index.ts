@@ -129,6 +129,12 @@ export const updateAllowedDirs = (dirs: DirEntry[]) =>
 export const shutdownServer = () =>
   http.post<{ message: string }>('/system/shutdown')
 
+export const getPortConfig = () =>
+  http.get<{ current_port: number; configured_port: number }>('/system/port-config')
+
+export const updatePortConfig = (port: number) =>
+  http.put<{ message: string; configured_port: number; current_port: number }>('/system/port-config', { port })
+
 // ── Software (Module B) ─────────────────────────────────
 
 export const getSoftwareList = (params?: { search?: string }) =>
@@ -264,3 +270,11 @@ export interface LogEntry {
 
 export const getLogs = (limit = 200) =>
   http.get<{ logs: LogEntry[] }>('/logs', { params: { limit } })
+
+// ── Config Import/Export ─────────────────────────────────
+
+export const exportSettings = () =>
+  http.get<Record<string, unknown>>('/system/export-config')
+
+export const importSettings = (config: Record<string, unknown>) =>
+  http.post<{ message: string; imported_keys: string[] }>('/system/import-config', config)

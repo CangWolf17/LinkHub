@@ -4,24 +4,28 @@
 职责:
   - 提供初始化状态检测（前端向导弹窗触发依据）
   - 提供 allowed_dirs 的读写管理
+  - 提供配置导入/导出
+  - 提供端口配置
   - 提供服务关闭端点（优雅终止整个进程）
 """
 
+import json
 import logging
 import os
-import signal
-import sys
 from typing import Union
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import (
+    APP_PORT,
     DEFAULT_ALLOWED_DIRS,
     VALID_DIR_TYPES,
     DirEntry,
+    _load_config_json,
+    _save_config_json,
     parse_allowed_dirs,
     serialize_allowed_dirs,
 )
@@ -136,6 +140,123 @@ async def update_allowed_dirs(
     return {"allowed_dirs": entries}
 
 
+# ── 端口配置 ──────────────────────────────────────────────
+
+
+@router.get(
+    "/port-config",
+    summary="获取当前端口配置",
+)
+async def get_port_config():
+    """返回当前运行端口和 config.json 中的配置。"""
+    user_config = _load_config_json()
+    return {
+        "current_port": APP_PORT,
+        "configured_port": user_config.get("port", 8147),
+    }
+
+
+class UpdatePortRequest(BaseModel):
+    port: int = Field(ge=1024, le=65535, description="端口号 (1024-65535)")
+
+
+@router.put(
+    "/port-config",
+    summary="更新端口配置（需重启生效）",
+)
+async def update_port_config(payload: UpdatePortRequest):
+    """更新 config.json 中的端口配置。修改后需重启 LinkHub 才能生效。"""
+    user_config = _load_config_json()
+    user_config["port"] = payload.port
+    if _save_config_json(user_config):
+        logger.info("端口配置已更新为 %d (需重启生效)", payload.port)
+        return {
+            "message": f"端口已设置为 {payload.port}，重启 LinkHub 后生效",
+            "configured_port": payload.port,
+            "current_port": APP_PORT,
+        }
+    return {
+        "message": "保存失败",
+        "configured_port": APP_PORT,
+        "current_port": APP_PORT,
+    }
+
+
+# ── 配置导入/导出 ────────────────────────────────────────
+
+# 导出时排除的敏感 key
+_SENSITIVE_KEYS = {"llm_api_key"}
+
+
+@router.get(
+    "/export-config",
+    summary="导出所有配置",
+)
+async def export_config(db: AsyncSession = Depends(get_db)):
+    """
+    导出 system_settings 表中的所有配置为 JSON。
+    API Key 等敏感字段会被排除。
+    """
+    result = await db.execute(select(SystemSetting))
+    settings = {}
+    for row in result.scalars().all():
+        if row.key in _SENSITIVE_KEYS:
+            continue
+        # allowed_dirs 特殊处理：解析为结构化数据
+        if row.key == "allowed_dirs":
+            settings[row.key] = parse_allowed_dirs(row.value)
+        else:
+            settings[row.key] = row.value
+    settings["_export_version"] = "1"
+    settings["_export_source"] = "LinkHub"
+    return settings
+
+
+@router.post(
+    "/import-config",
+    summary="导入配置",
+)
+async def import_config(
+    config: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    导入配置 JSON，批量覆盖 system_settings 表。
+    忽略敏感字段和元数据字段。
+    """
+    # 过滤掉元数据字段和敏感字段
+    skip_keys = _SENSITIVE_KEYS | {"_export_version", "_export_source"}
+    imported_keys = []
+
+    for key, value in config.items():
+        if key in skip_keys:
+            continue
+
+        # allowed_dirs 特殊处理：结构化数据 → JSON 字符串
+        if key == "allowed_dirs" and isinstance(value, list):
+            str_value = serialize_allowed_dirs(value)
+        elif isinstance(value, (dict, list)):
+            str_value = json.dumps(value, ensure_ascii=False)
+        else:
+            str_value = str(value)
+
+        result = await db.execute(select(SystemSetting).where(SystemSetting.key == key))
+        setting = result.scalar_one_or_none()
+        if setting:
+            setting.value = str_value
+        else:
+            db.add(SystemSetting(key=key, value=str_value))
+        imported_keys.append(key)
+
+    await db.flush()
+    await db.commit()
+    logger.info("配置已导入，共 %d 项: %s", len(imported_keys), imported_keys)
+    return {
+        "message": f"已导入 {len(imported_keys)} 项配置",
+        "imported_keys": imported_keys,
+    }
+
+
 @router.post(
     "/shutdown",
     summary="关闭 LinkHub 服务",
@@ -155,14 +276,8 @@ async def shutdown_server():
     async def _delayed_shutdown():
         await asyncio.sleep(1)
         logger.info("LinkHub 正在终止进程...")
-        from app.core.config import IS_FROZEN
-
-        if IS_FROZEN:
-            # 打包模式：直接退出，避免僵尸进程
-            os._exit(0)
-        else:
-            # 开发模式：发送 SIGINT 让 uvicorn 优雅停止
-            os.kill(os.getpid(), signal.SIGINT)
+        # 统一使用 os._exit 确保 Windows 上可靠退出
+        os._exit(0)
 
     asyncio.get_event_loop().create_task(_delayed_shutdown())
     return {"message": "服务正在关闭..."}

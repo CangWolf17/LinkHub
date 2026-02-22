@@ -95,7 +95,7 @@ logger = logging.getLogger("linkhub")
 
 
 async def _seed_default_settings():
-    """向 system_settings 插入默认配置（仅当 key 不存在时）。"""
+    """向 system_settings 插入默认配置（仅当 key 不存在时）。使用 batch 查询优化启动速度。"""
     defaults = {
         "allowed_dirs": serialize_allowed_dirs(DEFAULT_ALLOWED_DIRS),
         "llm_base_url": "",
@@ -116,11 +116,17 @@ async def _seed_default_settings():
     }
 
     async with async_session_factory() as session:
-        for key, value in defaults.items():
-            existing = await session.execute(
-                select(SystemSetting).where(SystemSetting.key == key)
+        # batch 查询：一次性获取所有已存在的 key
+        result = await session.execute(
+            select(SystemSetting.key).where(
+                SystemSetting.key.in_(list(defaults.keys()))
             )
-            if existing.scalar_one_or_none() is None:
+        )
+        existing_keys = {row[0] for row in result.all()}
+
+        # 只插入缺失的 key
+        for key, value in defaults.items():
+            if key not in existing_keys:
                 session.add(SystemSetting(key=key, value=value))
                 logger.info("初始化配置项: %s", key)
         await session.commit()
@@ -165,6 +171,10 @@ async def lifespan(app: FastAPI):
     # 迁移明文 API key → DPAPI 加密
     await _migrate_plaintext_api_key()
 
+    # 打包模式下提前打开浏览器（在 ChromaDB 初始化之前，减少用户感知等待时间）
+    if IS_FROZEN:
+        webbrowser.open(f"http://{APP_HOST}:{APP_PORT}")
+
     # 初始化 ChromaDB 向量数据库（可选，lite 版不含此依赖）
     try:
         from app.core.vector_store import get_chroma_client
@@ -177,10 +187,6 @@ async def lifespan(app: FastAPI):
         logger.error("ChromaDB 初始化失败: %s", exc, exc_info=True)
 
     logger.info("LinkHub 启动完成 -> http://%s:%s", APP_HOST, APP_PORT)
-
-    # 打包模式下自动打开浏览器
-    if IS_FROZEN:
-        webbrowser.open(f"http://{APP_HOST}:{APP_PORT}")
 
     yield
 
@@ -202,7 +208,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LinkHub - Local Smart Dashboard",
     description="本地智能工作区与软件控制台",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -243,6 +249,11 @@ if FRONTEND_DIST_DIR.is_dir():
     # SPA fallback: 非 /api 开头的路径返回 index.html
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
+        # /api/ 开头的路径不走 SPA fallback，交给 API 路由处理
+        if full_path.startswith("api/"):
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
         # 优先尝试静态文件
         file = FRONTEND_DIST_DIR / full_path
         if file.is_file():
@@ -288,6 +299,59 @@ async def ws_logs(websocket: WebSocket):
 # ── 启动入口 ──────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import socket
+    import urllib.request
+
+    def _check_port(host: str, port: int) -> bool:
+        """检测端口是否已被占用。"""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            return s.connect_ex((host, port)) == 0
+
+    def _is_linkhub_service(host: str, port: int) -> bool:
+        """检测占用端口的是否是 LinkHub 服务。"""
+        try:
+            url = f"http://{host}:{port}/api/health"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                data = json.loads(resp.read())
+                return data.get("service") == "LinkHub"
+        except Exception:
+            return False
+
+    # 端口冲突检测
+    if _check_port(APP_HOST, APP_PORT):
+        if _is_linkhub_service(APP_HOST, APP_PORT):
+            logger.info(
+                "检测到 LinkHub 已在 %s:%s 运行，直接打开浏览器连接已有服务",
+                APP_HOST,
+                APP_PORT,
+            )
+            webbrowser.open(f"http://{APP_HOST}:{APP_PORT}")
+            sys.exit(0)
+        else:
+            logger.error(
+                "端口 %s:%s 已被其他程序占用，无法启动 LinkHub。"
+                "请关闭占用该端口的程序，或在 config.json 中配置其他端口。",
+                APP_HOST,
+                APP_PORT,
+            )
+            if IS_FROZEN:
+                # 打包模式：弹出系统错误对话框
+                try:
+                    import ctypes
+
+                    ctypes.windll.user32.MessageBoxW(
+                        0,
+                        f"端口 {APP_HOST}:{APP_PORT} 已被其他程序占用，无法启动 LinkHub。\n"
+                        f"请关闭占用该端口的程序，或在 config.json 中配置其他端口。",
+                        "LinkHub 启动失败",
+                        0x10,  # MB_ICONERROR
+                    )
+                except Exception:
+                    pass
+            sys.exit(1)
+
     # 打包模式防僵尸进程：注册 atexit 确保进程树完整退出
     if IS_FROZEN:
         import atexit

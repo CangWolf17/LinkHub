@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version" />
+  <img src="https://img.shields.io/badge/version-1.1.0-blue.svg" alt="Version" />
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License" />
   <img src="https://img.shields.io/badge/platform-Windows-0078D6.svg" alt="Windows" />
   <img src="https://img.shields.io/badge/network-localhost%20only-critical.svg" alt="Localhost Only" />
@@ -17,7 +17,7 @@
 
 LinkHub 是一款 **仅限本机访问** 的智能文件与便携软件管理系统。它将散落在磁盘各处的绿色软件、项目工作区统一纳入管理，并通过 LLM 和语义搜索提供智能辅助能力。
 
-后端强制绑定 `127.0.0.1:8147`，不暴露到局域网，确保安全。
+后端强制绑定 `127.0.0.1`（默认端口 `8147`，可通过 `config.json` 自定义），不暴露到局域网，确保安全。
 
 ## 核心功能
 
@@ -29,7 +29,10 @@ LinkHub 是一款 **仅限本机访问** 的智能文件与便携软件管理系
 | **语义搜索** | 基于 ChromaDB 向量索引，输入自然语言即可检索软件和工作区（仅 full 版） |
 | **LLM 网关** | 统一的 LLM API 接入层，支持 OpenAI 兼容接口（本地 Ollama / 云端模型自由切换） |
 | **LLM 调试监控** | 浮窗实时展示 LLM 请求/响应原始数据，完全透明 |
-| **首次启动向导** | 首次打开时自动弹出设置向导，引导配置工作目录、LLM 和批量导入 |
+| **首次启动向导** | 首次打开时自动弹出设置向导，引导配置工作目录、LLM 和批量导入；支持导入已有配置快速跳过 |
+| **配置导入/导出** | 一键导出系统配置为 JSON 文件（自动排除敏感信息），可在新环境快速还原设置 |
+| **API URL 预设** | LLM 配置提供 OpenAI、Claude、Gemini、DeepSeek、智谱、Ollama 等常用 API 地址下拉选择 |
+| **自定义端口** | 通过 `config.json` 或设置页修改服务端口，启动时自动检测端口冲突 |
 | **API Key 加密** | 使用 Windows DPAPI 加密存储 API Key，不以明文落盘 |
 
 ## 快速开始（exe 版本）
@@ -49,12 +52,13 @@ LinkHub 是一款 **仅限本机访问** 的智能文件与便携软件管理系
 
 1. **lite 版**：将 exe 放到任意目录（建议专门创建一个文件夹），双击运行
 2. **full 版**：解压 ZIP 到任意目录，运行其中的 `LinkHub.exe`
-3. 浏览器会自动打开 `http://127.0.0.1:8147`
+3. 浏览器会自动打开 `http://127.0.0.1:8147`（若端口已被占用会提示修改 `config.json`）
 4. 按照设置向导完成初始化配置
 
 首次启动时会在 exe 所在目录自动创建：
 - `data/` — 数据库文件（`linkhub.db`）
 - `logs/` — 日志文件（`linkhub.log`）
+- `config.json` — 服务端口等配置（可手动编辑）
 
 > 删除 `data/` 目录可完全重置所有数据。
 
@@ -83,7 +87,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-服务将运行在 `http://127.0.0.1:8147`。
+服务将运行在 `http://127.0.0.1:8147`（默认端口，可通过 `config.json` 修改）。
 
 ### 3. 启动前端
 
@@ -95,7 +99,7 @@ npm run dev
 
 浏览器打开 `http://localhost:5173` 即可使用。
 
-> Vite 开发服务器已配置代理，`/api` 请求自动转发至后端 `127.0.0.1:8147`。
+> Vite 开发服务器已配置代理，`/api` 请求（含 WebSocket）自动转发至后端。
 
 ### 构建打包
 
@@ -127,7 +131,7 @@ LinkHub/
 │   ├── requirements.txt           # Python 依赖
 │   └── app/
 │       ├── core/
-│       │   ├── config.py          # 配置（打包/开发模式路径检测）
+│       │   ├── config.py          # 配置（打包/开发模式路径检测、config.json 端口管理）
 │       │   ├── crypto.py          # DPAPI 加解密
 │       │   ├── database.py        # SQLAlchemy 异步引擎
 │       │   ├── vector_store.py    # ChromaDB 客户端（可选）
@@ -135,7 +139,7 @@ LinkHub/
 │       ├── models/
 │       │   └── models.py          # ORM 模型（Software / Workspace / SystemSetting）
 │       ├── routers/
-│       │   ├── system_router.py   # 初始化状态检测、白名单目录管理
+│       │   ├── system_router.py   # 初始化状态检测、白名单目录管理、配置导入导出
 │       │   ├── os_router.py       # 启动程序、打开目录
 │       │   ├── metadata_router.py # 软件 & 工作区 CRUD + 批量扫描导入
 │       │   ├── llm_router.py      # LLM 配置、对话、Embedding
@@ -148,8 +152,9 @@ LinkHub/
 │   ├── vite.config.ts             # Vite 配置（代理 /api → 后端）
 │   └── src/
 │       ├── api/                   # Axios HTTP 封装 + 全部 API 函数
-│       ├── components/            # SetupWizard / SearchBar / SoftwareCard 等
+│       ├── components/            # SetupWizard / SearchBar / SoftwareCard / ApiUrlCombobox 等
 │       ├── composables/           # useLlmMonitor 组合式函数
+│       ├── constants/             # LLM API 预设地址等常量
 │       ├── layouts/               # AppLayout（侧边栏 + 顶栏 + 向导挂载）
 │       ├── views/                 # SoftwareView / WorkspaceView / SettingsView
 │       └── router/                # Vue Router 路由定义
@@ -162,11 +167,11 @@ LinkHub/
 
 启动后首次访问页面会自动弹出 **设置向导**：
 
-1. **配置工作目录** — 设置白名单目录（LinkHub 只在这些目录中扫描管理）
-2. **配置 LLM** — 填写 API Base URL、API Key 和模型名称（可跳过）
+1. **配置工作目录** — 设置白名单目录（LinkHub 只在这些目录中扫描管理）。支持导入已有配置文件快速跳过向导
+2. **配置 LLM** — 填写 API Base URL（提供常用预设下拉）、API Key 和模型名称（可跳过）
 3. **批量导入** — 一键扫描已有的便携软件和工作区目录
 
-之后可随时在 **设置页** 修改白名单目录、LLM 配置，或重新触发扫描导入。
+之后可随时在 **设置页**（分为目录、LLM、索引、导入、服务五个标签页）修改配置，或导出/导入设置。
 
 ## API 概览
 
@@ -178,6 +183,9 @@ LinkHub/
 | `GET` | `/system/init-status` | 系统初始化状态 |
 | `GET/PUT` | `/system/allowed-dirs` | 白名单目录读写 |
 | `POST` | `/system/shutdown` | 关闭服务 |
+| `GET/PUT` | `/system/port-config` | 端口配置读写 |
+| `GET` | `/system/export-config` | 导出系统配置（排除敏感信息） |
+| `POST` | `/system/import-config` | 导入系统配置 |
 | `GET/POST` | `/metadata/software` | 软件列表 / 创建 |
 | `GET/PUT/DELETE` | `/metadata/software/:id` | 软件详情 / 更新 / 删除 |
 | `GET/POST` | `/metadata/workspaces` | 工作区列表 / 创建 |

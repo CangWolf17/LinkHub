@@ -56,7 +56,57 @@ CHROMA_PERSIST_DIR = str(DATA_DIR / "chroma_db")
 
 # ── 服务配置 ──────────────────────────────────────────────
 APP_HOST = "127.0.0.1"
-APP_PORT = 8147
+_DEFAULT_PORT = 8147
+
+
+def _load_config_json() -> dict:
+    """
+    从 config.json 读取用户自定义配置。
+    打包模式：exe 同级目录；开发模式：项目根目录。
+    """
+    if IS_FROZEN:
+        config_path = _EXE_DIR / "config.json"
+    else:
+        config_path = BASE_DIR.parent / "config.json"
+
+    if not config_path.is_file():
+        return {}
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        logger.info("已加载 config.json: %s", config_path)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("config.json 解析失败: %s", e)
+        return {}
+
+
+def _save_config_json(data: dict) -> bool:
+    """保存用户配置到 config.json。"""
+    if IS_FROZEN:
+        config_path = _EXE_DIR / "config.json"
+    else:
+        config_path = BASE_DIR.parent / "config.json"
+
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except OSError as e:
+        logger.error("config.json 保存失败: %s", e)
+        return False
+
+
+def get_config_json_path() -> Path:
+    """返回 config.json 的路径（供 API 使用）。"""
+    if IS_FROZEN:
+        return _EXE_DIR / "config.json"
+    return BASE_DIR.parent / "config.json"
+
+
+_user_config = _load_config_json()
+APP_PORT = int(_user_config.get("port", _DEFAULT_PORT))
 
 # ── OS Bridge 白名单默认值 ────────────────────────────────
 # 这些默认值仅在 system_settings 表中尚未配置时使用。

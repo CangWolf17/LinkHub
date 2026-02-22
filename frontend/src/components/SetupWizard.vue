@@ -40,9 +40,24 @@
         <!-- ── Step 1: 工作目录 ── -->
         <div v-if="step === 1" class="px-6 pt-4 pb-6">
           <h2 class="text-lg font-bold text-gray-900 mb-1">欢迎使用 LinkHub</h2>
-          <p class="text-sm text-gray-500 mb-5">
+          <p class="text-sm text-gray-500 mb-4">
             首先设置你的工作目录白名单。LinkHub 将只在这些目录中扫描和管理软件与工作区。
           </p>
+
+          <!-- 导入配置快捷入口 -->
+          <div class="mb-5 p-3 bg-blue-50 rounded-xl border border-blue-100">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="text-sm font-medium text-blue-800">已有配置文件？</div>
+                <div class="text-xs text-blue-600 mt-0.5">导入后自动跳过向导</div>
+              </div>
+              <label class="px-3 py-1.5 text-sm font-medium text-blue-700 bg-white rounded-lg border border-blue-200 hover:bg-blue-50 cursor-pointer transition-colors">
+                导入配置
+                <input type="file" accept=".json" class="hidden" @change="handleImportConfig" />
+              </label>
+            </div>
+            <p v-if="importError" class="mt-2 text-xs text-red-600">{{ importError }}</p>
+          </div>
 
           <label class="block text-sm font-medium text-gray-700 mb-2">工作目录列表</label>
 
@@ -129,11 +144,10 @@
           <div class="space-y-4">
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">API Base URL</label>
-              <input
+              <ApiUrlCombobox
                 v-model="llm.base_url"
-                type="text"
-                placeholder="例: https://api.openai.com/v1"
-                class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                :options="LLM_API_PRESETS"
+                placeholder="选择或输入 API 地址"
               />
             </div>
             <div>
@@ -291,9 +305,12 @@ import {
   updateLlmConfig,
   scanAndImportSoftware,
   scanAndImportWorkspaces,
+  importSettings,
 } from '@/api'
 import type { DirEntry } from '@/api'
 import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
+import ApiUrlCombobox from '@/components/ApiUrlCombobox.vue'
+import { LLM_API_PRESETS } from '@/constants/llmPresets'
 
 const emit = defineEmits<{ (e: 'done'): void }>()
 
@@ -305,6 +322,32 @@ const step = ref(1)
 const dirs = ref<DirEntry[]>([{ path: '', type: 'software' }])
 const saving = ref(false)
 const step1Error = ref('')
+
+// 导入配置
+const importError = ref('')
+
+async function handleImportConfig(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  importError.value = ''
+  try {
+    const text = await file.text()
+    const config = JSON.parse(text)
+    if (!config._export_source || config._export_source !== 'LinkHub') {
+      importError.value = '不是有效的 LinkHub 配置文件'
+      return
+    }
+    await importSettings(config)
+    visible.value = false
+    emit('done')
+  } catch {
+    importError.value = '导入失败：文件格式错误'
+  } finally {
+    input.value = ''
+  }
+}
 
 function addDir() {
   dirs.value.push({ path: '', type: 'software' })
