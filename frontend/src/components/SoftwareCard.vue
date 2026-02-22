@@ -114,7 +114,7 @@
                 </svg>
               </button>
               <button
-                v-if="!software.is_missing && software.executable_path"
+                v-if="software.executable_path"
                 class="p-1 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                 title="打开所在文件夹"
                 @click="$emit('open-dir', parentDir)"

@@ -84,20 +84,66 @@
     <div v-else-if="items.length === 0" class="text-center py-12 text-gray-400 text-sm">
       暂无软件记录，拖入压缩包开始安装
     </div>
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <SoftwareCard
-        v-for="sw in items"
-        :key="sw.id"
-        :software="sw"
-        :selectable="selectMode"
-        :selected="selectedIds.has(sw.id)"
-        @launch="handleLaunch"
-        @delete="handleDelete"
-        @updated="handleUpdated"
-        @toggle-select="toggleSelect"
-        @open-dir="handleOpenDir"
-      />
-    </div>
+    <template v-else>
+      <!-- 正常软件 -->
+      <div v-if="normalItems.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <SoftwareCard
+          v-for="sw in normalItems"
+          :key="sw.id"
+          :software="sw"
+          :selectable="selectMode"
+          :selected="selectedIds.has(sw.id)"
+          @launch="handleLaunch"
+          @delete="handleDelete"
+          @updated="handleUpdated"
+          @toggle-select="toggleSelect"
+          @open-dir="handleOpenDir"
+        />
+      </div>
+      <div v-else-if="missingItems.length > 0" class="text-center py-8 text-gray-400 text-sm">
+        所有软件均路径失效
+      </div>
+
+      <!-- 路径失效折叠区域 -->
+      <div v-if="missingItems.length > 0" class="mt-6">
+        <button
+          class="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-lg transition-colors text-sm font-medium border border-gray-200"
+          @click="showMissing = !showMissing"
+        >
+          <svg
+            class="w-4 h-4 transition-transform duration-200"
+            :class="showMissing ? 'rotate-180' : ''"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+          路径失效 ({{ missingItems.length }})
+        </button>
+        <transition
+          enter-active-class="transition-all duration-300 ease-out"
+          enter-from-class="opacity-0 max-h-0"
+          enter-to-class="opacity-100 max-h-[2000px]"
+          leave-active-class="transition-all duration-200 ease-in"
+          leave-from-class="opacity-100 max-h-[2000px]"
+          leave-to-class="opacity-0 max-h-0"
+        >
+          <div v-if="showMissing" class="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 overflow-hidden">
+            <SoftwareCard
+              v-for="sw in missingItems"
+              :key="sw.id"
+              :software="sw"
+              :selectable="selectMode"
+              :selected="selectedIds.has(sw.id)"
+              @launch="handleLaunch"
+              @delete="handleDelete"
+              @updated="handleUpdated"
+              @toggle-select="toggleSelect"
+              @open-dir="handleOpenDir"
+            />
+          </div>
+        </transition>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -120,10 +166,16 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const selectMode = ref(false)
 const selectedIds = ref<Set<string>>(new Set())
 
+// 路径失效折叠状态
+const showMissing = ref(false)
+
 // 批量生成状态
 const bulkGenerating = ref(false)
 const bulkProgress = ref(0)
 const bulkTotal = ref(0)
+
+const normalItems = computed(() => items.value.filter((s) => !s.is_missing))
+const missingItems = computed(() => items.value.filter((s) => s.is_missing))
 
 const itemsWithoutDescription = computed(() =>
   items.value.filter((s) => !s.description && !s.is_missing)
