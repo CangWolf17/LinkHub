@@ -20,6 +20,8 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
     strategy:
       matrix:
         python-version: ['3.11']
@@ -64,14 +66,14 @@ jobs:
       - name: Extract version from source
         id: version
         run: |
-          $content = Get-Content backend/app/core/config.py -Raw
+          $content = Get-Content backend/app/core/config.py -Raw -Encoding utf8
           if ($content -match 'APP_VERSION\s*=\s*"([^"]+)"') {
             $version = $Matches[1]
           } else {
             $version = "0.0.0"
           }
           Write-Host "Version: $version"
-          echo "version=$version" >> $env:GITHUB_OUTPUT
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
         shell: pwsh
 
       - name: Build lite
