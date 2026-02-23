@@ -20,6 +20,28 @@
         </span>
       </div>
       <div class="flex items-center gap-2">
+        <!-- 新建工作区 -->
+        <button
+          class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+          @click="openCreateDialog"
+        >
+          + 新建工作区
+        </button>
+        <!-- AI 批量 -->
+        <button
+          v-if="itemsWithoutDescription.length > 0 && !bulkGenerating"
+          class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
+          @click="bulkGenerate"
+        >
+          AI 批量生成描述 ({{ itemsWithoutDescription.length }})
+        </button>
+        <button
+          v-if="bulkGenerating"
+          class="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
+          @click="stopBulkGenerate"
+        >
+          停止生成 ({{ bulkProgress }}/{{ bulkTotal }})
+        </button>
         <!-- 时间分组 -->
         <select
           v-model="groupBy"
@@ -69,20 +91,7 @@
             <option value="archived">已归档</option>
           </select>
         </template>
-        <button
-          v-if="itemsWithoutDescription.length > 0 && !bulkGenerating"
-          class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
-          @click="bulkGenerate"
-        >
-          AI 批量生成描述 ({{ itemsWithoutDescription.length }})
-        </button>
-        <button
-          v-if="bulkGenerating"
-          class="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
-          @click="stopBulkGenerate"
-        >
-          停止生成 ({{ bulkProgress }}/{{ bulkTotal }})
-        </button>
+        <!-- 清理死链 -->
         <button
           class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
           title="清理死链"
@@ -93,12 +102,6 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" />
             <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
           </svg>
-        </button>
-        <button
-          class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-          @click="openCreateDialog"
-        >
-          + 新建工作区
         </button>
       </div>
     </div>
