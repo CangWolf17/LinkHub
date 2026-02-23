@@ -14,6 +14,8 @@ export interface Software {
   tags: string | null
   icon_path: string | null
   is_missing?: boolean
+  exe_exists?: boolean
+  dir_exists?: boolean
   last_used_at: string | null
   created_at: string
   updated_at: string

@@ -43,7 +43,9 @@ class SoftwareResponse(BaseModel):
     description: str | None = None
     tags: str | None = None
     icon_path: str | None = None
-    is_missing: bool = Field(False, description="可执行文件路径是否已失效（死链）")
+    is_missing: bool = Field(False, description="完全失效（exe和目录都不存在）")
+    exe_exists: bool = Field(True, description="可执行文件是否存在")
+    dir_exists: bool = Field(True, description="安装目录是否存在")
     last_used_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

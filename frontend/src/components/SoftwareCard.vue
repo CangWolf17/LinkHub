@@ -4,7 +4,7 @@
     <div
       :data-id="software.id"
       class="bg-white rounded-xl border shadow-sm overflow-hidden transition-all hover:shadow-md"
-      :class="software.is_missing ? 'border-gray-300 opacity-60' : 'border-gray-200'"
+      :class="software.is_missing ? 'border-gray-300 opacity-60' : isResourceOnly ? 'border-amber-200' : 'border-gray-200'"
     >
       <div class="p-4">
         <!-- 标题行 -->
@@ -19,7 +19,7 @@
               @change="$emit('toggle-select', software.id)"
             />
             <span class="text-lg flex-shrink-0">
-              {{ software.is_missing ? '⚠️' : '📦' }}
+              {{ software.is_missing ? '⚠️' : isResourceOnly ? '📁' : '📦' }}
             </span>
             <h3
               class="text-sm font-semibold truncate"
@@ -32,8 +32,9 @@
 
           <!-- 操作菜单 -->
           <div class="flex items-center gap-1 flex-shrink-0">
+            <!-- 正常软件：启动按钮 -->
             <button
-              v-if="!software.is_missing && software.executable_path"
+              v-if="!software.is_missing && !isResourceOnly && software.executable_path"
               class="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
               title="启动"
               @click="$emit('launch', software.executable_path)"
@@ -41,6 +42,17 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+            <!-- 资源类：打开目录按钮（突出显示） -->
+            <button
+              v-if="isResourceOnly"
+              class="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+              title="打开目录"
+              @click="$emit('open-dir', folderPath)"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
               </svg>
             </button>
             <button
@@ -133,10 +145,19 @@
           {{ software.executable_path || '未指定可执行文件' }}
         </div>
 
-        <!-- 死链标记 -->
-        <div v-if="software.is_missing" class="mt-2">
-          <span class="inline-block text-[10px] px-2 py-0.5 bg-red-50 text-red-600 rounded-full font-medium">
+        <!-- 状态标记 -->
+        <div v-if="software.is_missing || isResourceOnly" class="mt-2">
+          <span
+            v-if="software.is_missing"
+            class="inline-block text-[10px] px-2 py-0.5 bg-red-50 text-red-600 rounded-full font-medium"
+          >
             路径失效
+          </span>
+          <span
+            v-else-if="isResourceOnly"
+            class="inline-block text-[10px] px-2 py-0.5 bg-amber-50 text-amber-600 rounded-full font-medium"
+          >
+            资源
           </span>
         </div>
 
@@ -190,6 +211,11 @@ const editTextarea = ref<HTMLTextAreaElement | null>(null)
 // LLM 生成状态
 const generating = ref(false)
 const showAiDialog = ref(false)
+
+// 资源类判断：exe不存在但目录存在
+const isResourceOnly = computed(() => {
+  return props.software.exe_exists === false && props.software.dir_exists === true
+})
 
 const parentDir = computed(() => {
   if (!props.software.executable_path) return ''

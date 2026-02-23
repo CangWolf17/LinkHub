@@ -110,7 +110,28 @@ def _check_path_missing(path_str: str) -> bool:
 
 
 def _to_software_response(item: PortableSoftware) -> SoftwareResponse:
-    """将 ORM 对象转换为响应模型，附加 is_missing 标记。"""
+    """将 ORM 对象转换为响应模型，附加 is_missing / exe_exists / dir_exists 标记。"""
+    exe_path = item.executable_path
+    install_dir = item.install_dir
+
+    # 判断 exe 是否存在
+    exe_exists = not _check_path_missing(exe_path) if exe_path else False
+
+    # 判断安装目录是否存在
+    if install_dir:
+        dir_exists = not _check_path_missing(install_dir)
+    elif exe_path:
+        # 没有 install_dir 时，用 exe 路径的父目录
+        try:
+            dir_exists = Path(exe_path).parent.exists()
+        except (OSError, ValueError):
+            dir_exists = False
+    else:
+        dir_exists = False
+
+    # is_missing 仅在 exe 不存在 且 目录也不存在时为 True（完全失效）
+    is_missing = not exe_exists and not dir_exists
+
     return SoftwareResponse(
         id=item.id,
         name=item.name,
@@ -119,9 +140,9 @@ def _to_software_response(item: PortableSoftware) -> SoftwareResponse:
         description=item.description,
         tags=item.tags,
         icon_path=item.icon_path,
-        is_missing=_check_path_missing(item.executable_path)
-        if item.executable_path
-        else (_check_path_missing(item.install_dir) if item.install_dir else True),
+        is_missing=is_missing,
+        exe_exists=exe_exists,
+        dir_exists=dir_exists,
         last_used_at=item.last_used_at,
         created_at=item.created_at,
         updated_at=item.updated_at,
