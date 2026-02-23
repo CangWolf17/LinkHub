@@ -16,11 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 # ── 目录条目类型 ──────────────────────────────────────────
-class DirEntry(TypedDict):
-    """白名单目录条目：包含路径和类型（software/workspace）"""
+class _DirEntryRequired(TypedDict):
+    """必填字段"""
 
     path: str
     type: str  # "software" | "workspace"
+
+
+class DirEntry(_DirEntryRequired, total=False):
+    """白名单目录条目：包含路径、类型和可选自定义标签"""
+
+    label: str  # 可选，用户自定义显示名称
 
 
 # ── 打包模式检测 ──────────────────────────────────────────
@@ -164,7 +170,12 @@ def parse_allowed_dirs(raw_json: str) -> list[DirEntry]:
             p = str(item.get("path", "")).strip()
             t = str(item.get("type", DIR_TYPE_SOFTWARE)).strip()
             if p and t in VALID_DIR_TYPES:
-                entries.append(DirEntry(path=p, type=t))
+                entry = DirEntry(path=p, type=t)
+                # 保留可选的自定义标签
+                lbl = str(item.get("label", "")).strip()
+                if lbl:
+                    entry["label"] = lbl
+                entries.append(entry)
         elif isinstance(item, str):
             # 向后兼容：旧格式字符串数组，默认视为 software
             p = item.strip()

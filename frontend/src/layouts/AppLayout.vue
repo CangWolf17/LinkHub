@@ -63,21 +63,36 @@
                 全部
               </router-link>
               <!-- 各目录子项 -->
-              <router-link
-                v-for="child in item.children"
-                :key="child.path"
-                :to="{ path: item.path, query: { dir: child.path } }"
-                class="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors truncate"
-                :class="[
-                  $route.path === item.path && $route.query.dir === child.path
-                    ? 'bg-blue-50 text-blue-600'
-                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700',
-                ]"
-                :title="child.path"
-              >
-                <span class="w-1.5 h-1.5 rounded-full" :class="child.dotColor" />
-                {{ child.label }}
-              </router-link>
+              <template v-for="child in item.children" :key="child.path">
+                <!-- 重命名模式 -->
+                <div v-if="renamingPath === child.path" class="flex items-center gap-2 px-3 py-1">
+                  <span class="w-1.5 h-1.5 rounded-full" :class="child.dotColor" />
+                  <input
+                    v-model="renameInput"
+                    class="flex-1 min-w-0 text-xs px-1.5 py-0.5 border border-blue-400 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    @keyup.enter="confirmRename(child.path)"
+                    @keyup.escape="cancelRename"
+                    @blur="confirmRename(child.path)"
+                    @vue:mounted="($event: any) => $event.el.focus()"
+                  />
+                </div>
+                <!-- 正常显示 -->
+                <router-link
+                  v-else
+                  :to="{ path: item.path, query: { dir: child.path } }"
+                  class="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium transition-colors truncate"
+                  :class="[
+                    $route.path === item.path && $route.query.dir === child.path
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700',
+                  ]"
+                  :title="child.path"
+                  @dblclick.prevent="startRename(child.path, child.label)"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full" :class="child.dotColor" />
+                  {{ child.label }}
+                </router-link>
+              </template>
             </div>
           </div>
         </template>
@@ -134,7 +149,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getHealth, getInitStatus, getAllowedDirs, llmHealthCheck } from '@/api'
+import { getHealth, getInitStatus, getAllowedDirs, updateAllowedDirs, llmHealthCheck } from '@/api'
 import type { DirEntry } from '@/api'
 import { useLlmMonitor } from '@/composables/useLlmMonitor'
 import SearchBar from '@/components/SearchBar.vue'
@@ -147,7 +162,10 @@ const { state: _llmState, ...llmMonitor } = useLlmMonitor()
 
 // 工作区白名单目录列表（用于侧边栏子菜单）
 const workspaceDirEntries = ref<Array<{ path: string; label: string; dotColor: string }>>([])
+const allDirEntries = ref<DirEntry[]>([])  // 完整列表（保存时用）
 const DOT_COLORS = ['bg-blue-400', 'bg-emerald-400', 'bg-amber-400', 'bg-purple-400', 'bg-pink-400', 'bg-cyan-400']
+const renamingPath = ref<string | null>(null)
+const renameInput = ref('')
 
 interface NavItem {
   path: string
@@ -218,12 +236,16 @@ async function checkStatus() {
 async function loadWorkspaceDirs() {
   try {
     const { data } = await getAllowedDirs()
+    allDirEntries.value = data.allowed_dirs
     workspaceDirEntries.value = data.allowed_dirs
       .filter((d: DirEntry) => d.type === 'workspace')
       .map((d: DirEntry, i: number) => {
-        // 取目录名作为标签
-        const segments = d.path.replace(/[\\/]+$/, '').split(/[\\/]/)
-        const label = segments[segments.length - 1] || d.path
+        // 优先使用自定义标签，否则取目录名
+        let label = d.label?.trim()
+        if (!label) {
+          const segments = d.path.replace(/[\\/]+$/, '').split(/[\\/]/)
+          label = segments[segments.length - 1] || d.path
+        }
         return { path: d.path, label, dotColor: DOT_COLORS[i % DOT_COLORS.length] }
       })
   } catch { /* ignore */ }
@@ -244,6 +266,42 @@ function onWizardDone() {
   showWizard.value = false
   checkStatus()
   loadWorkspaceDirs()
+}
+
+function startRename(childPath: string, currentLabel: string) {
+  renamingPath.value = childPath
+  renameInput.value = currentLabel
+}
+
+async function confirmRename(childPath: string) {
+  const newLabel = renameInput.value.trim()
+  renamingPath.value = null
+
+  // 更新 allDirEntries 中对应条目的 label
+  const updated = allDirEntries.value.map(d => {
+    if (d.path === childPath) {
+      // 如果新标签等于目录名本身，则清除自定义标签
+      const segments = d.path.replace(/[\\/]+$/, '').split(/[\\/]/)
+      const dirName = segments[segments.length - 1] || d.path
+      if (!newLabel || newLabel === dirName) {
+        const { label: _removed, ...rest } = d as DirEntry & { label?: string }
+        return rest as DirEntry
+      }
+      return { ...d, label: newLabel }
+    }
+    return d
+  })
+
+  try {
+    await updateAllowedDirs(updated)
+    allDirEntries.value = updated
+    // 更新侧边栏显示
+    await loadWorkspaceDirs()
+  } catch { /* ignore */ }
+}
+
+function cancelRename() {
+  renamingPath.value = null
 }
 
 onMounted(() => {

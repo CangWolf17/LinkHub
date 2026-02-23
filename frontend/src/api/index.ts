@@ -66,6 +66,7 @@ export interface SearchResponse {
 export interface DirEntry {
   path: string
   type: 'software' | 'workspace'
+  label?: string
 }
 
 export interface DirItem {
