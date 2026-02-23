@@ -35,22 +35,24 @@
         >
           {{ selectMode ? '取消选择' : '多选' }}
         </button>
-        <!-- 批量删除按钮 -->
-        <button
-          v-if="selectMode && selectedIds.size > 0"
-          class="px-3 py-1.5 text-xs font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors"
-          @click="batchDelete"
-        >
-          删除选中 ({{ selectedIds.size }})
-        </button>
-        <!-- 全选 -->
-        <button
-          v-if="selectMode"
-          class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-          @click="toggleSelectAll"
-        >
-          {{ selectedIds.size === items.length ? '取消全选' : '全选' }}
-        </button>
+        <!-- 多选模式下立即显示的批量操作按钮 -->
+        <template v-if="selectMode">
+          <!-- 全选 -->
+          <button
+            class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            @click="toggleSelectAll"
+          >
+            {{ selectedIds.size === items.length ? '取消全选' : '全选' }}
+          </button>
+          <!-- 批量删除按钮 -->
+          <button
+            class="px-3 py-1.5 text-xs font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="selectedIds.size === 0"
+            @click="batchDelete"
+          >
+            删除选中 ({{ selectedIds.size }})
+          </button>
+        </template>
         <button
           v-if="itemsWithoutDescription.length > 0 && !bulkGenerating"
           class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50"
