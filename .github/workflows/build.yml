@@ -1,0 +1,115 @@
+name: Build LinkHub
+
+on:
+  # Tag 推送时自动构建 + 发布 Release
+  push:
+    tags:
+      - 'v*'
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      build_full:
+        description: '同时构建 full 版（含 ChromaDB，耗时较长）'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write  # 创建 Release 需要写权限
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ['3.11']
+        node-version: ['20']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pyinstaller
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Download UPX
+        run: |
+          $upxVersion = "5.0.1"
+          $upxUrl = "https://github.com/upx/upx/releases/download/v${upxVersion}/upx-${upxVersion}-win64.zip"
+          Invoke-WebRequest -Uri $upxUrl -OutFile upx.zip
+          Expand-Archive -Path upx.zip -DestinationPath tools
+          # upx 解压后在 tools/upx-5.0.1-win64/
+          Write-Host "UPX installed at tools/upx-${upxVersion}-win64/"
+        shell: pwsh
+
+      - name: Extract version from source
+        id: version
+        run: |
+          $content = Get-Content backend/app/core/config.py -Raw
+          if ($content -match 'APP_VERSION\s*=\s*"([^"]+)"') {
+            $version = $Matches[1]
+          } else {
+            $version = "0.0.0"
+          }
+          Write-Host "Version: $version"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Build lite
+        run: python build.py --lite --clean --version ${{ steps.version.outputs.version }}
+
+      - name: Rename lite artifact
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          Move-Item "dist/LinkHub-lite.exe" "dist/LinkHub-v${version}-lite.exe"
+        shell: pwsh
+
+      - name: Build full
+        if: >-
+          inputs.build_full == true ||
+          startsWith(github.ref, 'refs/tags/')
+        run: python build.py --full --no-frontend --version ${{ steps.version.outputs.version }}
+
+      - name: Upload lite artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinkHub-lite
+          path: dist/LinkHub-v*-lite.exe
+
+      - name: Upload full artifact
+        if: >-
+          inputs.build_full == true ||
+          startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinkHub-full
+          path: dist/LinkHub-v*-full.zip
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: LinkHub v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            dist/LinkHub-v*-lite.exe
+            dist/LinkHub-v*-full.zip
