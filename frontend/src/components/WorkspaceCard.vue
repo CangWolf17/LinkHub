@@ -95,14 +95,36 @@
         >
           路径失效
         </span>
+
+        <!-- 目录树展开按钮 -->
+        <button
+          v-if="!workspace.is_missing"
+          class="ml-auto p-0.5 text-gray-300 hover:text-gray-500 transition-colors"
+          :title="treeExpanded ? '收起目录树' : '展开目录树'"
+          @click="treeExpanded = !treeExpanded"
+        >
+          <svg
+            class="w-3.5 h-3.5 transition-transform duration-200"
+            :class="treeExpanded ? 'rotate-180' : ''"
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
       </div>
+    </div>
+
+    <!-- 内嵌目录树 -->
+    <div v-if="treeExpanded" class="border-t border-gray-100 px-3 py-2 max-h-64 overflow-y-auto bg-gray-50/50">
+      <DirectoryTree :root-path="workspace.directory_path" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import type { Workspace } from '@/api'
+import DirectoryTree from '@/components/DirectoryTree.vue'
 
 const props = defineProps<{
   workspace: Workspace
@@ -116,6 +138,8 @@ defineEmits<{
   delete: [id: string]
   'toggle-select': [id: string]
 }>()
+
+const treeExpanded = ref(false)
 
 const statusIcon = computed(() => {
   if (props.workspace.is_missing) return '⚠️'

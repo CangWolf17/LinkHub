@@ -603,3 +603,124 @@ async def extract_icon(
         return IconResponse(success=True, icon_base64=icon_b64)
     else:
         return IconResponse(success=False, message="无法提取图标")
+
+
+# ── 目录内容列表端点（目录树） ───────────────────────────
+
+
+class ListDirRequest(BaseModel):
+    """目录列表请求"""
+
+    path: str = Field(..., description="目标目录的绝对路径")
+
+
+class ListDirItem(BaseModel):
+    """目录列表中的单个条目"""
+
+    name: str
+    path: str
+    is_dir: bool
+    is_symlink: bool = False
+    symlink_target: str | None = None
+    size: int | None = None  # 文件大小（字节），目录为 None
+    modified_at: str | None = None  # ISO 格式修改时间
+
+
+class ListDirResponse(BaseModel):
+    """目录列表响应"""
+
+    success: bool
+    path: str
+    items: list[ListDirItem] = []
+    message: str = ""
+
+
+@router.post(
+    "/list-dir",
+    response_model=ListDirResponse,
+    summary="列出目录内容（文件+子目录，含符号链接检测）",
+)
+async def list_directory(
+    req: ListDirRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    列出指定目录下的所有文件和子目录，用于卡片内嵌目录树。
+    包含符号链接检测、文件大小、修改时间等元数据。
+    受白名单限制。
+    """
+    resolved = _sanitize_and_resolve(req.path)
+    allowed_dirs = await _get_allowed_dirs(db)
+
+    # 白名单校验
+    if not _validate_path_within_whitelist(resolved, allowed_dirs):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"路径不在允许的白名单目录内: {resolved}",
+        )
+
+    if not resolved.is_dir():
+        return ListDirResponse(
+            success=False,
+            path=str(resolved),
+            message="目标不是目录或不存在",
+        )
+
+    items: list[ListDirItem] = []
+    try:
+        for entry in sorted(
+            resolved.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())
+        ):
+            # 跳过隐藏文件（以 . 开头）
+            if entry.name.startswith("."):
+                continue
+
+            try:
+                is_link = entry.is_symlink()
+                is_dir = entry.is_dir()
+                symlink_target: str | None = None
+                size: int | None = None
+                modified_at: str | None = None
+
+                if is_link:
+                    try:
+                        symlink_target = str(os.readlink(entry))
+                    except OSError:
+                        symlink_target = None
+
+                try:
+                    stat = entry.stat()
+                    if not is_dir:
+                        size = stat.st_size
+                    modified_at = datetime.fromtimestamp(
+                        stat.st_mtime, tz=timezone.utc
+                    ).isoformat()
+                except OSError:
+                    pass
+
+                items.append(
+                    ListDirItem(
+                        name=entry.name,
+                        path=str(entry),
+                        is_dir=is_dir,
+                        is_symlink=is_link,
+                        symlink_target=symlink_target,
+                        size=size,
+                        modified_at=modified_at,
+                    )
+                )
+            except (PermissionError, OSError):
+                # 无权限的条目跳过
+                continue
+    except PermissionError:
+        return ListDirResponse(
+            success=False,
+            path=str(resolved),
+            message="没有权限访问该目录",
+        )
+
+    return ListDirResponse(
+        success=True,
+        path=str(resolved),
+        items=items,
+    )

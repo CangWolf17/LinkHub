@@ -81,6 +81,23 @@ export interface BrowseDirResponse {
   items: DirItem[]
 }
 
+export interface ListDirItem {
+  name: string
+  path: string
+  is_dir: boolean
+  is_symlink: boolean
+  symlink_target: string | null
+  size: number | null
+  modified_at: string | null
+}
+
+export interface ListDirResponse {
+  success: boolean
+  path: string
+  items: ListDirItem[]
+  message: string
+}
+
 export interface InstallerUploadResponse {
   success: boolean
   software_id: string
@@ -370,6 +387,9 @@ export const extractIcon = (executablePath: string, size = 32) =>
     executable_path: executablePath,
     size,
   })
+
+export const listDir = (path: string) =>
+  http.post<ListDirResponse>('/os/list-dir', { path })
 
 // ── Logs ─────────────────────────────────────────────────
 
