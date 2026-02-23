@@ -106,6 +106,12 @@ class LLMConfigResponse(BaseModel):
     llm_max_tokens: int = 1024
     llm_system_prompt_software: str = ""
     llm_system_prompt_workspace: str = ""
+    ai_blacklist_software: list[str] = Field(
+        default_factory=list, description="AI 批量操作排除的软件名列表"
+    )
+    ai_blacklist_workspace: list[str] = Field(
+        default_factory=list, description="AI 批量操作排除的工作区名列表"
+    )
 
 
 class LLMConfigUpdate(BaseModel):
@@ -118,3 +124,5 @@ class LLMConfigUpdate(BaseModel):
     llm_max_tokens: int | None = None
     llm_system_prompt_software: str | None = None
     llm_system_prompt_workspace: str | None = None
+    ai_blacklist_software: list[str] | None = None
+    ai_blacklist_workspace: list[str] | None = None

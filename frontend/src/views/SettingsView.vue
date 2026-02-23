@@ -207,6 +207,36 @@
           />
         </div>
 
+        <!-- AI 批量黑名单: 软件 -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            软件 AI 黑名单
+            <span class="text-xs text-gray-400 font-normal ml-1">名称匹配的软件将跳过 AI 批量操作（每行一个）</span>
+          </label>
+          <textarea
+            v-model="blacklistSoftwareText"
+            rows="3"
+            placeholder="每行一个软件名称，如：&#10;7-Zip&#10;Notepad++"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y font-mono"
+          />
+          <p class="text-xs text-gray-400 mt-1">当前 {{ form.ai_blacklist_software.length }} 项</p>
+        </div>
+
+        <!-- AI 批量黑名单: 工作区 -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            工作区 AI 黑名单
+            <span class="text-xs text-gray-400 font-normal ml-1">名称匹配的工作区将跳过 AI 批量操作（每行一个）</span>
+          </label>
+          <textarea
+            v-model="blacklistWorkspaceText"
+            rows="3"
+            placeholder="每行一个工作区名称"
+            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y font-mono"
+          />
+          <p class="text-xs text-gray-400 mt-1">当前 {{ form.ai_blacklist_workspace.length }} 项</p>
+        </div>
+
         <!-- 按钮 -->
         <div class="flex items-center gap-3 pt-2">
           <button
@@ -525,6 +555,8 @@ const form = reactive({
   llm_max_tokens: 1024,
   llm_system_prompt_software: '',
   llm_system_prompt_workspace: '',
+  ai_blacklist_software: [] as string[],
+  ai_blacklist_workspace: [] as string[],
 })
 const showKey = ref(false)
 const saving = ref(false)
@@ -538,6 +570,20 @@ const messageClass = computed(() =>
     : 'bg-red-50 text-red-700 border border-red-200',
 )
 
+// 黑名单: textarea 文本 <-> 数组 双向绑定
+const blacklistSoftwareText = computed({
+  get: () => form.ai_blacklist_software.join('\n'),
+  set: (val: string) => {
+    form.ai_blacklist_software = val.split('\n').map(s => s.trim()).filter(Boolean)
+  },
+})
+const blacklistWorkspaceText = computed({
+  get: () => form.ai_blacklist_workspace.join('\n'),
+  set: (val: string) => {
+    form.ai_blacklist_workspace = val.split('\n').map(s => s.trim()).filter(Boolean)
+  },
+})
+
 async function loadConfig() {
   try {
     const { data } = await getLlmConfig()
@@ -549,6 +595,8 @@ async function loadConfig() {
     form.llm_max_tokens = data.llm_max_tokens ?? 1024
     form.llm_system_prompt_software = data.llm_system_prompt_software || ''
     form.llm_system_prompt_workspace = data.llm_system_prompt_workspace || ''
+    form.ai_blacklist_software = data.ai_blacklist_software || []
+    form.ai_blacklist_workspace = data.ai_blacklist_workspace || []
   } catch {
     showMsg('加载配置失败', 'error')
   }
@@ -558,7 +606,7 @@ async function saveConfig() {
   saving.value = true
   message.value = ''
   try {
-    const payload: Record<string, string | number> = {}
+    const payload: Record<string, string | number | string[]> = {}
     if (form.llm_base_url) payload.llm_base_url = form.llm_base_url
     if (form.llm_api_key) payload.llm_api_key = form.llm_api_key
     if (form.model_chat) payload.model_chat = form.model_chat
@@ -566,6 +614,8 @@ async function saveConfig() {
     payload.llm_max_tokens = form.llm_max_tokens
     if (form.llm_system_prompt_software !== undefined) payload.llm_system_prompt_software = form.llm_system_prompt_software
     if (form.llm_system_prompt_workspace !== undefined) payload.llm_system_prompt_workspace = form.llm_system_prompt_workspace
+    payload.ai_blacklist_software = form.ai_blacklist_software
+    payload.ai_blacklist_workspace = form.ai_blacklist_workspace
     await updateLlmConfig(payload)
     showMsg('配置已保存', 'success')
     await loadConfig()

@@ -53,15 +53,7 @@ async def get_llm_config(
 ):
     """返回 LLM 配置状态，API Key 仅返回是否已设置。"""
     config = await load_llm_config(db)
-    return LLMConfigResponse(
-        llm_base_url=config.get("llm_base_url", ""),
-        has_api_key=bool(config.get("llm_api_key", "").strip()),
-        model_chat=config.get("model_chat", ""),
-        model_embedding=config.get("model_embedding", ""),
-        llm_max_tokens=int(config.get("llm_max_tokens", "1024")),
-        llm_system_prompt_software=config.get("llm_system_prompt_software", ""),
-        llm_system_prompt_workspace=config.get("llm_system_prompt_workspace", ""),
-    )
+    return _build_config_response(config)
 
 
 @router.put(
@@ -81,6 +73,12 @@ async def update_llm_config(
         if key == "llm_api_key" and value:
             value = encrypt_value(value)
 
+        # 黑名单字段: list[str] → JSON 字符串
+        if key in ("ai_blacklist_software", "ai_blacklist_workspace") and isinstance(
+            value, list
+        ):
+            value = json.dumps(value, ensure_ascii=False)
+
         # DB system_settings 所有 value 都是 str，pydantic 可能传入 int
         db_value = str(value) if not isinstance(value, str) else value
 
@@ -97,6 +95,22 @@ async def update_llm_config(
 
     # 返回更新后的配置
     config = await load_llm_config(db)
+    return _build_config_response(config)
+
+
+def _parse_json_list(raw: str) -> list[str]:
+    """安全解析 JSON 字符串数组，失败时返回空列表。"""
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return [str(item) for item in data]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return []
+
+
+def _build_config_response(config: dict) -> LLMConfigResponse:
+    """从 KV dict 构建 LLMConfigResponse。"""
     return LLMConfigResponse(
         llm_base_url=config.get("llm_base_url", ""),
         has_api_key=bool(config.get("llm_api_key", "").strip()),
@@ -105,6 +119,12 @@ async def update_llm_config(
         llm_max_tokens=int(config.get("llm_max_tokens", "1024")),
         llm_system_prompt_software=config.get("llm_system_prompt_software", ""),
         llm_system_prompt_workspace=config.get("llm_system_prompt_workspace", ""),
+        ai_blacklist_software=_parse_json_list(
+            config.get("ai_blacklist_software", "[]")
+        ),
+        ai_blacklist_workspace=_parse_json_list(
+            config.get("ai_blacklist_workspace", "[]")
+        ),
     )
 
 

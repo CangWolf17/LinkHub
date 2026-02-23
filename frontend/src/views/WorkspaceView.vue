@@ -217,7 +217,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getWorkspaceList, deleteWorkspace, openDir, cleanupDeadWorkspaces, batchDeleteWorkspaces, batchUpdateWorkspaceStatus, generateWorkspaceDescription } from '@/api'
+import { getWorkspaceList, deleteWorkspace, openDir, cleanupDeadWorkspaces, batchDeleteWorkspaces, batchUpdateWorkspaceStatus, generateWorkspaceDescription, getLlmConfig } from '@/api'
 import type { Workspace } from '@/api'
 import WorkspaceCard from '@/components/WorkspaceCard.vue'
 import WorkspaceDialog from '@/components/WorkspaceDialog.vue'
@@ -451,6 +451,7 @@ const bulkGenerating = ref(false)
 const bulkProgress = ref(0)
 const bulkTotal = ref(0)
 let bulkAbort = false
+const workspaceBlacklist = ref<string[]>([])
 
 const itemsWithoutDescription = computed(() =>
   items.value.filter((w) => !w.description && !w.is_missing)
@@ -461,9 +462,21 @@ function stopBulkGenerate() {
 }
 
 async function bulkGenerate() {
-  const targets = itemsWithoutDescription.value
-  if (targets.length === 0) return
-  if (!confirm(`将为 ${targets.length} 个无描述的工作区生成 AI 描述，确定?`)) return
+  // 加载黑名单
+  try {
+    const { data } = await getLlmConfig()
+    workspaceBlacklist.value = data.ai_blacklist_workspace || []
+  } catch { /* ignore */ }
+  const blackSet = new Set(workspaceBlacklist.value.map(n => n.toLowerCase()))
+
+  const targets = itemsWithoutDescription.value.filter(w => !blackSet.has(w.name.toLowerCase()))
+  const skipped = itemsWithoutDescription.value.length - targets.length
+  if (targets.length === 0) {
+    alert(skipped > 0 ? `所有无描述工作区均在黑名单中（${skipped} 个已跳过）` : '没有需要生成描述的工作区')
+    return
+  }
+  const skipMsg = skipped > 0 ? `（${skipped} 个黑名单已跳过）` : ''
+  if (!confirm(`将为 ${targets.length} 个无描述的工作区生成 AI 描述${skipMsg}，确定?`)) return
 
   bulkGenerating.value = true
   bulkTotal.value = targets.length

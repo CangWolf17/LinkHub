@@ -42,6 +42,8 @@ export interface LlmConfig {
   llm_max_tokens: number
   llm_system_prompt_software: string
   llm_system_prompt_workspace: string
+  ai_blacklist_software: string[]
+  ai_blacklist_workspace: string[]
 }
 
 export interface SearchResultItem {

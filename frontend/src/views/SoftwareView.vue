@@ -237,7 +237,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getSoftwareList, uploadInstall, deleteSoftware, launchApp, openDir, cleanupDeadSoftware, generateSoftwareDescription, batchDeleteSoftware, scanAndImportSoftware, generateSoftwareTags } from '@/api'
+import { getSoftwareList, uploadInstall, deleteSoftware, launchApp, openDir, cleanupDeadSoftware, generateSoftwareDescription, batchDeleteSoftware, scanAndImportSoftware, generateSoftwareTags, getLlmConfig } from '@/api'
 import type { Software } from '@/api'
 import SoftwareCard from '@/components/SoftwareCard.vue'
 
@@ -276,6 +276,7 @@ const bulkGenerating = ref(false)
 const bulkProgress = ref(0)
 const bulkTotal = ref(0)
 let bulkAbort = false
+const softwareBlacklist = ref<string[]>([])
 
 // 解析标签的工具函数
 function parseTags(tagsStr: string | null): string[] {
@@ -514,9 +515,21 @@ function stopBulkGenerate() {
 }
 
 async function bulkGenerate() {
-  const targets = itemsWithoutDescription.value
-  if (targets.length === 0) return
-  if (!confirm(`将为 ${targets.length} 个无描述的软件生成 AI 描述，确定?`)) return
+  // 加载黑名单
+  try {
+    const { data } = await getLlmConfig()
+    softwareBlacklist.value = data.ai_blacklist_software || []
+  } catch { /* ignore */ }
+  const blackSet = new Set(softwareBlacklist.value.map(n => n.toLowerCase()))
+
+  const targets = itemsWithoutDescription.value.filter(s => !blackSet.has(s.name.toLowerCase()))
+  const skipped = itemsWithoutDescription.value.length - targets.length
+  if (targets.length === 0) {
+    alert(skipped > 0 ? `所有无描述软件均在黑名单中（${skipped} 个已跳过）` : '没有需要生成描述的软件')
+    return
+  }
+  const skipMsg = skipped > 0 ? `（${skipped} 个黑名单已跳过）` : ''
+  if (!confirm(`将为 ${targets.length} 个无描述的软件生成 AI 描述${skipMsg}，确定?`)) return
 
   bulkGenerating.value = true
   bulkTotal.value = targets.length
@@ -548,9 +561,21 @@ async function bulkGenerate() {
 }
 
 async function bulkGenerateTags() {
-  const targets = itemsWithoutTags.value
-  if (targets.length === 0) return
-  if (!confirm(`将为 ${targets.length} 个无标签的软件生成 AI 类型标签，确定?`)) return
+  // 加载黑名单
+  try {
+    const { data } = await getLlmConfig()
+    softwareBlacklist.value = data.ai_blacklist_software || []
+  } catch { /* ignore */ }
+  const blackSet = new Set(softwareBlacklist.value.map(n => n.toLowerCase()))
+
+  const targets = itemsWithoutTags.value.filter(s => !blackSet.has(s.name.toLowerCase()))
+  const skipped = itemsWithoutTags.value.length - targets.length
+  if (targets.length === 0) {
+    alert(skipped > 0 ? `所有无标签软件均在黑名单中（${skipped} 个已跳过）` : '没有需要生成标签的软件')
+    return
+  }
+  const skipMsg = skipped > 0 ? `（${skipped} 个黑名单已跳过）` : ''
+  if (!confirm(`将为 ${targets.length} 个无标签的软件生成 AI 类型标签${skipMsg}，确定?`)) return
 
   bulkGenerating.value = true
   bulkTotal.value = targets.length
