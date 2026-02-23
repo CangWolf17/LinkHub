@@ -58,7 +58,7 @@
           class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50"
           @click="bulkGenerate"
         >
-          AI 批量生成描述 ({{ itemsWithoutDescription.length }})
+          AI 批量清洗 ({{ itemsWithoutDescription.length }})
         </button>
         <button
           v-if="bulkGenerating"
@@ -525,11 +525,11 @@ async function bulkGenerate() {
   const targets = itemsWithoutDescription.value.filter(s => !blackSet.has(s.name.toLowerCase()))
   const skipped = itemsWithoutDescription.value.length - targets.length
   if (targets.length === 0) {
-    alert(skipped > 0 ? `所有无描述软件均在黑名单中（${skipped} 个已跳过）` : '没有需要生成描述的软件')
+    alert(skipped > 0 ? `所有无描述软件均在黑名单中（${skipped} 个已跳过）` : '没有需要清洗的软件')
     return
   }
   const skipMsg = skipped > 0 ? `（${skipped} 个黑名单已跳过）` : ''
-  if (!confirm(`将为 ${targets.length} 个无描述的软件生成 AI 描述${skipMsg}，确定?`)) return
+  if (!confirm(`将为 ${targets.length} 个无描述的软件执行 AI 清洗（生成描述）${skipMsg}，确定?`)) return
 
   bulkGenerating.value = true
   bulkTotal.value = targets.length
@@ -557,7 +557,7 @@ async function bulkGenerate() {
 
   bulkGenerating.value = false
   const stoppedMsg = bulkAbort ? '（已手动停止）' : ''
-  alert(`批量生成完成${stoppedMsg}：成功 ${successCount} 个，失败 ${failCount} 个`)
+  alert(`批量清洗完成${stoppedMsg}：成功 ${successCount} 个，失败 ${failCount} 个`)
 }
 
 async function bulkGenerateTags() {

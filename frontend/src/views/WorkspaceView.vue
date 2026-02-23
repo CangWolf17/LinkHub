@@ -33,7 +33,7 @@
           class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
           @click="bulkGenerate"
         >
-          AI 批量生成描述 ({{ itemsWithoutDescription.length }})
+          AI 批量清洗 ({{ itemsWithoutDescription.length }})
         </button>
         <button
           v-if="bulkGenerating"
@@ -220,7 +220,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getWorkspaceList, deleteWorkspace, openDir, cleanupDeadWorkspaces, batchDeleteWorkspaces, batchUpdateWorkspaceStatus, generateWorkspaceDescription, getLlmConfig } from '@/api'
+import { getWorkspaceList, deleteWorkspace, openDir, cleanupDeadWorkspaces, batchDeleteWorkspaces, batchUpdateWorkspaceStatus, generateWorkspaceDescription, getLlmConfig, aiWorkspaceFillForm, updateWorkspace } from '@/api'
 import type { Workspace } from '@/api'
 import WorkspaceCard from '@/components/WorkspaceCard.vue'
 import WorkspaceDialog from '@/components/WorkspaceDialog.vue'
@@ -475,11 +475,11 @@ async function bulkGenerate() {
   const targets = itemsWithoutDescription.value.filter(w => !blackSet.has(w.name.toLowerCase()))
   const skipped = itemsWithoutDescription.value.length - targets.length
   if (targets.length === 0) {
-    alert(skipped > 0 ? `所有无描述工作区均在黑名单中（${skipped} 个已跳过）` : '没有需要生成描述的工作区')
+    alert(skipped > 0 ? `所有无描述工作区均在黑名单中（${skipped} 个已跳过）` : '没有需要清洗的工作区')
     return
   }
   const skipMsg = skipped > 0 ? `（${skipped} 个黑名单已跳过）` : ''
-  if (!confirm(`将为 ${targets.length} 个无描述的工作区生成 AI 描述${skipMsg}，确定?`)) return
+  if (!confirm(`将为 ${targets.length} 个工作区执行 AI 清洗（名称清洗 + 生成描述）${skipMsg}，确定?`)) return
 
   bulkGenerating.value = true
   bulkTotal.value = targets.length
@@ -492,11 +492,20 @@ async function bulkGenerate() {
   for (const ws of targets) {
     if (bulkAbort) break
     try {
-      const { data } = await generateWorkspaceDescription(ws.id)
+      const { data } = await aiWorkspaceFillForm(ws.directory_path)
       if (data.success) {
-        const idx = allItems.value.findIndex((w) => w.id === ws.id)
-        if (idx !== -1) {
-          allItems.value[idx] = { ...allItems.value[idx], description: data.description }
+        // 将 AI 清洗结果（名称 + 描述）写入数据库
+        const updates: Record<string, string> = {}
+        if (data.name && data.name !== ws.name) updates.name = data.name
+        if (data.description) updates.description = data.description
+        if (data.deadline && !ws.deadline) updates.deadline = data.deadline
+
+        if (Object.keys(updates).length > 0) {
+          const { data: updated } = await updateWorkspace(ws.id, updates)
+          const idx = allItems.value.findIndex((w) => w.id === ws.id)
+          if (idx !== -1) {
+            allItems.value[idx] = { ...allItems.value[idx], ...updated }
+          }
         }
         successCount++
       } else {
@@ -510,7 +519,7 @@ async function bulkGenerate() {
 
   bulkGenerating.value = false
   const stoppedMsg = bulkAbort ? '（已手动停止）' : ''
-  alert(`批量生成完成${stoppedMsg}：成功 ${successCount} 个，失败 ${failCount} 个`)
+  alert(`批量清洗完成${stoppedMsg}：成功 ${successCount} 个，失败 ${failCount} 个`)
 }
 
 // 页面离开时自动停止批量生成

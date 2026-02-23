@@ -7,7 +7,6 @@
           {{ isEdit ? '编辑工作区' : '新建工作区' }}
         </h3>
         <button
-          v-if="!isEdit"
           class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
           :disabled="aiFilling"
           :title="aiFilling ? 'AI 填充中...' : 'AI 根据目录路径自动填充表单'"
