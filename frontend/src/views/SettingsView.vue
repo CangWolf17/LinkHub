@@ -356,6 +356,12 @@
 
     <!-- ═══ Tab: 服务 ═══ -->
     <div v-if="activeTab === 'service'">
+      <!-- 版本信息 -->
+      <div class="flex items-center gap-3 mb-8 px-1">
+        <span class="text-sm text-gray-500">LinkHub</span>
+        <span class="text-sm font-medium text-gray-900">{{ appVersion || '...' }}</span>
+      </div>
+
       <!-- 端口配置 -->
       <h2 class="text-lg font-bold text-gray-900 mb-2">端口配置</h2>
       <p class="text-sm text-gray-500 mb-4">
@@ -455,6 +461,7 @@ import {
   shutdownServer,
   getPortConfig, updatePortConfig,
   exportSettings, importSettings,
+  getHealth,
 } from '@/api'
 import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse, DirEntry } from '@/api'
 import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
@@ -814,11 +821,22 @@ async function confirmShutdown() {
   }
 }
 
+// ── 版本信息 ─────────────────────────────────────────
+const appVersion = ref('')
+
+async function loadVersion() {
+  try {
+    const { data } = await getHealth()
+    appVersion.value = data.version ? `v${data.version}` : ''
+  } catch { /* ignore */ }
+}
+
 // ── 初始化 ───────────────────────────────────────────
 onMounted(() => {
   loadAllowedDirs()
   loadConfig()
   loadStats()
   loadPortConfig()
+  loadVersion()
 })
 </script>

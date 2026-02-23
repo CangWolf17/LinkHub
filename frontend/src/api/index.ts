@@ -133,7 +133,7 @@ export interface IndexStats {
 
 // ── Health ───────────────────────────────────────────────
 
-export const getHealth = () => http.get<{ status: string }>('/health')
+export const getHealth = () => http.get<{ status: string; version?: string }>('/health')
 
 // ── System ───────────────────────────────────────────────
 

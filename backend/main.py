@@ -232,7 +232,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LinkHub - Local Smart Dashboard",
     description="本地智能工作区与软件控制台",
-    version="1.2.0",
+    version="1.3.0",
     lifespan=lifespan,
 )
 
@@ -293,7 +293,7 @@ if FRONTEND_DIST_DIR.is_dir():
 @app.get("/api/health", tags=["System"])
 async def health_check():
     """服务健康检查端点"""
-    return {"status": "ok", "service": "LinkHub"}
+    return {"status": "ok", "service": "LinkHub", "version": app.version}
 
 
 # ── 日志端点 ──────────────────────────────────────────────
