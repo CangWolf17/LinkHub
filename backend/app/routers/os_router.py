@@ -8,6 +8,7 @@
   4. 非阻塞执行 — subprocess.Popen + DETACHED_PROCESS，绝不阻塞主线程
 """
 
+import ctypes
 import logging
 import os
 import subprocess
@@ -177,6 +178,52 @@ async def launch_executable(
         )
 
     except OSError as e:
+        # WinError 740: 需要提升权限 — 使用 ShellExecuteW runas 提权重试
+        if sys.platform == "win32" and getattr(e, "winerror", None) == 740:
+            logger.info("程序需要管理员权限，尝试提权启动: %s", resolved)
+            try:
+                ret = ctypes.windll.shell32.ShellExecuteW(
+                    None, "runas", str(resolved), None, str(resolved.parent), 1
+                )
+                if ret > 32:
+                    logger.info("已提权拉起程序: %s", resolved)
+
+                    # 更新最近使用时间
+                    try:
+                        result = await db.execute(
+                            select(PortableSoftware).where(
+                                PortableSoftware.executable_path == str(resolved)
+                            )
+                        )
+                        sw = result.scalar_one_or_none()
+                        if sw:
+                            sw.last_used_at = datetime.now(timezone.utc)
+                            await db.commit()
+                    except Exception as ex:
+                        logger.debug("更新 last_used_at 失败（非阻塞）: %s", ex)
+
+                    return OSActionResponse(
+                        success=True,
+                        message="程序已以管理员权限启动",
+                        target_path=str(resolved),
+                    )
+                else:
+                    logger.warning(
+                        "提权启动失败 (ShellExecute 返回 %d): %s", ret, resolved
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"提权启动失败，用户可能取消了 UAC 提示 (code={ret})",
+                    )
+            except HTTPException:
+                raise
+            except Exception as ex:
+                logger.error("提权启动异常: %s -> %s", resolved, ex)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"提权启动失败: {ex}",
+                )
+
         logger.error("拉起程序失败: %s -> %s", resolved, e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
