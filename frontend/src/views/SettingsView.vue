@@ -86,6 +86,80 @@
         <p v-if="dirsError" class="mt-3 text-xs text-red-600">{{ dirsError }}</p>
         <p v-if="dirsSuccess" class="mt-3 text-xs text-green-600">{{ dirsSuccess }}</p>
       </div>
+
+      <!-- 批量导入 -->
+      <h2 class="text-lg font-bold text-gray-900 mt-8 mb-2">批量导入</h2>
+      <p class="text-sm text-gray-500 mb-4">
+        扫描白名单目录，将已有的便携软件和工作区目录批量导入数据库。已存在的记录会自动跳过。
+      </p>
+      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-5">
+        <!-- 软件扫描 -->
+        <div>
+          <div class="flex items-center gap-3">
+            <button
+              class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              :disabled="scanningApps"
+              @click="doScanApps"
+            >
+              {{ scanningApps ? '扫描中...' : '扫描导入软件' }}
+            </button>
+            <span v-if="scanAppsResult" class="text-sm" :class="scanAppsResult.success ? 'text-green-600' : 'text-red-600'">
+              {{ scanAppsResult.message }}
+            </span>
+          </div>
+          <div v-if="scanAppsResult && scanAppsResult.details.length" class="mt-3 max-h-48 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+            <div
+              v-for="d in scanAppsResult.details"
+              :key="d.name"
+              class="flex items-center gap-2 px-3 py-1.5 text-xs"
+            >
+              <span
+                class="w-14 shrink-0 text-center rounded-full px-1.5 py-0.5 font-medium"
+                :class="{
+                  'bg-green-100 text-green-700': d.status === 'imported',
+                  'bg-gray-100 text-gray-500': d.status === 'skipped',
+                  'bg-red-100 text-red-600': d.status === 'failed',
+                }"
+              >{{ d.status === 'imported' ? '导入' : d.status === 'skipped' ? '跳过' : '失败' }}</span>
+              <span class="text-gray-800 truncate">{{ d.name }}</span>
+              <span v-if="d.reason" class="text-gray-400 ml-auto shrink-0">{{ d.reason }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 工作区扫描 -->
+        <div class="border-t border-gray-100 pt-5">
+          <div class="flex items-center gap-3">
+            <button
+              class="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors"
+              :disabled="scanningWs"
+              @click="doScanWorkspaces"
+            >
+              {{ scanningWs ? '扫描中...' : '扫描导入工作区' }}
+            </button>
+            <span v-if="scanWsResult" class="text-sm" :class="scanWsResult.success ? 'text-green-600' : 'text-red-600'">
+              {{ scanWsResult.message }}
+            </span>
+          </div>
+          <div v-if="scanWsResult && scanWsResult.details.length" class="mt-3 max-h-48 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+            <div
+              v-for="d in scanWsResult.details"
+              :key="d.name"
+              class="flex items-center gap-2 px-3 py-1.5 text-xs"
+            >
+              <span
+                class="w-14 shrink-0 text-center rounded-full px-1.5 py-0.5 font-medium"
+                :class="{
+                  'bg-green-100 text-green-700': d.status === 'imported',
+                  'bg-gray-100 text-gray-500': d.status === 'skipped',
+                }"
+              >{{ d.status === 'imported' ? '导入' : '跳过' }}</span>
+              <span class="text-gray-800 truncate">{{ d.name }}</span>
+              <span v-if="d.reason" class="text-gray-400 ml-auto shrink-0">{{ d.reason }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ═══ Tab: LLM ═══ -->
@@ -280,82 +354,6 @@
       </div>
     </div>
 
-    <!-- ═══ Tab: 导入 ═══ -->
-    <div v-if="activeTab === 'import'">
-      <h2 class="text-lg font-bold text-gray-900 mb-2">批量导入</h2>
-      <p class="text-sm text-gray-500 mb-4">
-        扫描白名单目录，将已有的便携软件和工作区目录批量导入数据库。已存在的记录会自动跳过。
-      </p>
-      <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-5">
-        <!-- 软件扫描 -->
-        <div>
-          <div class="flex items-center gap-3">
-            <button
-              class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-              :disabled="scanningApps"
-              @click="doScanApps"
-            >
-              {{ scanningApps ? '扫描中...' : '扫描导入软件' }}
-            </button>
-            <span v-if="scanAppsResult" class="text-sm" :class="scanAppsResult.success ? 'text-green-600' : 'text-red-600'">
-              {{ scanAppsResult.message }}
-            </span>
-          </div>
-          <div v-if="scanAppsResult && scanAppsResult.details.length" class="mt-3 max-h-48 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
-            <div
-              v-for="d in scanAppsResult.details"
-              :key="d.name"
-              class="flex items-center gap-2 px-3 py-1.5 text-xs"
-            >
-              <span
-                class="w-14 shrink-0 text-center rounded-full px-1.5 py-0.5 font-medium"
-                :class="{
-                  'bg-green-100 text-green-700': d.status === 'imported',
-                  'bg-gray-100 text-gray-500': d.status === 'skipped',
-                  'bg-red-100 text-red-600': d.status === 'failed',
-                }"
-              >{{ d.status === 'imported' ? '导入' : d.status === 'skipped' ? '跳过' : '失败' }}</span>
-              <span class="text-gray-800 truncate">{{ d.name }}</span>
-              <span v-if="d.reason" class="text-gray-400 ml-auto shrink-0">{{ d.reason }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 工作区扫描 -->
-        <div class="border-t border-gray-100 pt-5">
-          <div class="flex items-center gap-3">
-            <button
-              class="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors"
-              :disabled="scanningWs"
-              @click="doScanWorkspaces"
-            >
-              {{ scanningWs ? '扫描中...' : '扫描导入工作区' }}
-            </button>
-            <span v-if="scanWsResult" class="text-sm" :class="scanWsResult.success ? 'text-green-600' : 'text-red-600'">
-              {{ scanWsResult.message }}
-            </span>
-          </div>
-          <div v-if="scanWsResult && scanWsResult.details.length" class="mt-3 max-h-48 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
-            <div
-              v-for="d in scanWsResult.details"
-              :key="d.name"
-              class="flex items-center gap-2 px-3 py-1.5 text-xs"
-            >
-              <span
-                class="w-14 shrink-0 text-center rounded-full px-1.5 py-0.5 font-medium"
-                :class="{
-                  'bg-green-100 text-green-700': d.status === 'imported',
-                  'bg-gray-100 text-gray-500': d.status === 'skipped',
-                }"
-              >{{ d.status === 'imported' ? '导入' : '跳过' }}</span>
-              <span class="text-gray-800 truncate">{{ d.name }}</span>
-              <span v-if="d.reason" class="text-gray-400 ml-auto shrink-0">{{ d.reason }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- ═══ Tab: 服务 ═══ -->
     <div v-if="activeTab === 'service'">
       <!-- 端口配置 -->
@@ -469,7 +467,6 @@ const tabs = [
   { key: 'dirs', label: '目录' },
   { key: 'llm', label: 'LLM' },
   { key: 'index', label: '索引' },
-  { key: 'import', label: '导入' },
   { key: 'service', label: '服务' },
 ] as const
 
