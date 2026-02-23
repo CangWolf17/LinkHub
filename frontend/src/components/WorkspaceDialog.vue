@@ -85,11 +85,38 @@
         <!-- 截止日期 -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">截止日期 (可选)</label>
-          <input
-            v-model="form.deadline"
-            type="date"
-            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
+          <div class="relative">
+            <DatePicker
+              v-model="deadlineDate"
+              :masks="{ input: 'YYYY-MM-DD' }"
+              :popover="{ visibility: 'focus' }"
+              color="blue"
+            >
+              <template #default="{ inputValue, inputEvents }">
+                <div class="flex items-center gap-2">
+                  <input
+                    :value="inputValue"
+                    v-on="inputEvents"
+                    type="text"
+                    placeholder="选择截止日期"
+                    readonly
+                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+                  />
+                  <button
+                    v-if="deadlineDate"
+                    type="button"
+                    class="absolute right-2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                    title="清除日期"
+                    @click="deadlineDate = null"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </template>
+            </DatePicker>
+          </div>
         </div>
 
         <!-- 状态 -->
@@ -149,6 +176,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { createWorkspace, updateWorkspace, generateWorkspaceDescription, getAllowedDirs, aiWorkspaceFillForm } from '@/api'
 import type { Workspace, DirEntry } from '@/api'
+import { DatePicker } from 'v-calendar'
 import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
 import AiPromptDialog from '@/components/AiPromptDialog.vue'
 
@@ -171,6 +199,21 @@ const form = reactive({
   status: 'active',
 })
 
+// VCalendar 使用 Date 对象，form.deadline 使用 YYYY-MM-DD 字符串
+const deadlineDate = ref<Date | null>(null)
+
+// 同步 Date 对象 → form.deadline 字符串
+watch(deadlineDate, (d) => {
+  if (d) {
+    const yyyy = d.getFullYear()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    form.deadline = `${yyyy}-${mm}-${dd}`
+  } else {
+    form.deadline = ''
+  }
+})
+
 const saving = ref(false)
 const error = ref('')
 const generatingDesc = ref(false)
@@ -186,9 +229,12 @@ onMounted(async () => {
     form.name = props.workspace.name
     form.directory_path = props.workspace.directory_path
     form.description = props.workspace.description || ''
-    form.deadline = props.workspace.deadline
-      ? new Date(props.workspace.deadline).toISOString().split('T')[0]
-      : ''
+    if (props.workspace.deadline) {
+      const parsed = new Date(props.workspace.deadline)
+      if (!isNaN(parsed.getTime())) {
+        deadlineDate.value = parsed
+      }
+    }
     form.status = props.workspace.status
   }
 
@@ -276,7 +322,12 @@ async function handleAiFill() {
     if (data.success) {
       if (data.name) form.name = data.name
       if (data.description) form.description = data.description
-      if (data.deadline) form.deadline = data.deadline
+      if (data.deadline) {
+        const parsed = new Date(data.deadline)
+        if (!isNaN(parsed.getTime())) {
+          deadlineDate.value = parsed
+        }
+      }
     } else {
       error.value = data.message || 'AI 填充失败'
     }

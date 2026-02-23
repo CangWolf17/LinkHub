@@ -220,7 +220,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getWorkspaceList, deleteWorkspace, openDir, cleanupDeadWorkspaces, batchDeleteWorkspaces, batchUpdateWorkspaceStatus, generateWorkspaceDescription, getLlmConfig, aiWorkspaceFillForm, updateWorkspace } from '@/api'
+import { getWorkspaceList, deleteWorkspace, openDir, cleanupDeadWorkspaces, batchDeleteWorkspaces, batchUpdateWorkspaceStatus, getLlmConfig, aiWorkspaceFillForm, updateWorkspace } from '@/api'
 import type { Workspace } from '@/api'
 import WorkspaceCard from '@/components/WorkspaceCard.vue'
 import WorkspaceDialog from '@/components/WorkspaceDialog.vue'
