@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.0-blue.svg" alt="Version" />
+  <img src="https://img.shields.io/badge/version-1.3.0-blue.svg" alt="Version" />
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License" />
   <img src="https://img.shields.io/badge/platform-Windows-0078D6.svg" alt="Windows" />
   <img src="https://img.shields.io/badge/network-localhost%20only-critical.svg" alt="Localhost Only" />
@@ -26,12 +26,18 @@ LinkHub 是一款 **仅限本机访问** 的智能文件与便携软件管理系
 | **软件快速部署** | 拖拽上传压缩包，自动解压、启发式寻址主程序、写入数据库并生成启动卡片 |
 | **批量扫描导入** | 一键扫描白名单目录，将已有便携软件和工作区目录批量导入 |
 | **工作区看板** | 对本地目录添加备注、截止日期等元数据，一键在资源管理器中打开 |
+| **目录树浏览** | 卡片内嵌展开目录树状结构，支持符号链接检测和右键创建 junction |
+| **exe 图标提取** | 自动提取便携软件的 exe 图标显示在卡片上，无需手动设置 |
+| **AI 智能填充** | LLM 自动生成软件/工作区描述，支持批量 AI 清洗（名称清洗 + 描述 + 日期提取） |
+| **AI 黑名单** | 设置页配置软件/工作区 AI 批量操作排除名单 |
 | **语义搜索** | 基于 ChromaDB 向量索引，输入自然语言即可检索软件和工作区（仅 full 版） |
 | **LLM 网关** | 统一的 LLM API 接入层，支持 OpenAI 兼容接口（本地 Ollama / 云端模型自由切换） |
 | **LLM 调试监控** | 浮窗实时展示 LLM 请求/响应原始数据，完全透明 |
 | **首次启动向导** | 首次打开时自动弹出设置向导，引导配置工作目录、LLM 和批量导入；支持导入已有配置快速跳过 |
-| **配置导入/导出** | 一键导出系统配置为 JSON 文件（自动排除敏感信息），可在新环境快速还原设置 |
-| **API URL 预设** | LLM 配置提供 OpenAI、Claude、Gemini、DeepSeek、智谱、Ollama 等常用 API 地址下拉选择 |
+| **配置导入/导出** | 导出系统配置、软件描述/标签和工作区元数据为 JSON（自动排除敏感信息），可在新环境快速还原 |
+| **管理员提权** | 需要管理员权限的软件自动检测 WinError 740 并使用 ShellExecuteW runas 提权启动 |
+| **侧边栏自定义** | 工作区二级菜单支持双击重命名自定义标签 |
+| **现代化 UI** | Lucide Icons 图标体系，VCalendar 日期选择器 |
 | **自定义端口** | 通过 `config.json` 或设置页修改服务端口，启动时自动检测端口冲突 |
 | **API Key 加密** | 使用 Windows DPAPI 加密存储 API Key，不以明文落盘 |
 
@@ -107,6 +113,7 @@ npm run dev
 python build.py              # 打包 lite 版（不含 ChromaDB）
 python build.py --full       # 打包 full 版（含 ChromaDB 语义搜索）
 python build.py --all        # 同时打包两个版本
+python build.py --version 1.3.0  # 指定版本号（默认从源码读取）
 ```
 
 产物输出到 `dist/` 目录。
@@ -114,7 +121,7 @@ python build.py --all        # 同时打包两个版本
 ## 技术栈
 
 ```
-前端    Vue 3 (Composition API) + TypeScript + Tailwind CSS v4 + Vue Router
+前端    Vue 3 (Composition API) + TypeScript + Tailwind CSS v4 + Vue Router + Lucide Icons
 后端    Python 3.10+ / FastAPI + Uvicorn（强制 127.0.0.1）
 关系库  SQLite（通过 SQLAlchemy + aiosqlite 异步访问）
 向量库  ChromaDB（可选，本地持久化，内置 all-MiniLM-L6-v2 embedding）
@@ -140,7 +147,7 @@ LinkHub/
 │       │   └── models.py          # ORM 模型（Software / Workspace / SystemSetting）
 │       ├── routers/
 │       │   ├── system_router.py   # 初始化状态检测、白名单目录管理、配置导入导出
-│       │   ├── os_router.py       # 启动程序、打开目录
+│       │   ├── os_router.py       # 启动程序、打开目录、目录树浏览、符号链接创建、图标提取
 │       │   ├── metadata_router.py # 软件 & 工作区 CRUD + 批量扫描导入
 │       │   ├── llm_router.py      # LLM 配置、对话、Embedding
 │       │   ├── installer_router.py# 压缩包上传安装 + 批量扫描导入
@@ -171,7 +178,7 @@ LinkHub/
 2. **配置 LLM** — 填写 API Base URL（提供常用预设下拉）、API Key 和模型名称（可跳过）
 3. **批量导入** — 一键扫描已有的便携软件和工作区目录
 
-之后可随时在 **设置页**（分为目录、LLM、索引、导入、服务五个标签页）修改配置，或导出/导入设置。
+之后可随时在 **设置页**（分为目录、LLM、索引、服务四个标签页）修改配置，或导出/导入设置。目录标签页同时包含批量导入功能。
 
 ## API 概览
 
@@ -179,25 +186,28 @@ LinkHub/
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/health` | 健康检查 |
+| `GET` | `/health` | 健康检查（含版本号） |
 | `GET` | `/system/init-status` | 系统初始化状态 |
 | `GET/PUT` | `/system/allowed-dirs` | 白名单目录读写 |
 | `POST` | `/system/shutdown` | 关闭服务 |
 | `GET/PUT` | `/system/port-config` | 端口配置读写 |
-| `GET` | `/system/export-config` | 导出系统配置（排除敏感信息） |
-| `POST` | `/system/import-config` | 导入系统配置 |
+| `GET` | `/system/export-config` | 导出配置（含软件/工作区元数据，排除敏感信息） |
+| `POST` | `/system/import-config` | 导入配置（含元数据回填） |
 | `GET/POST` | `/metadata/software` | 软件列表 / 创建 |
 | `GET/PUT/DELETE` | `/metadata/software/:id` | 软件详情 / 更新 / 删除 |
 | `GET/POST` | `/metadata/workspaces` | 工作区列表 / 创建 |
 | `POST` | `/metadata/workspaces/scan` | 批量扫描导入工作区 |
-| `GET/PUT` | `/llm/config` | LLM 配置读写 |
+| `GET/PUT` | `/llm/config` | LLM 配置读写（含 AI 黑名单） |
 | `POST` | `/llm/test-connection` | LLM 连接测试 |
 | `POST` | `/installer/upload` | 上传压缩包安装软件 |
 | `POST` | `/installer/scan-dirs` | 批量扫描导入软件 |
 | `POST` | `/search` | 语义搜索（仅 full 版） |
 | `POST` | `/search/reindex` | 重建向量索引（仅 full 版） |
-| `POST` | `/os/launch` | 启动程序 |
+| `POST` | `/os/launch` | 启动程序（含自动提权） |
 | `POST` | `/os/open-dir` | 打开目录 |
+| `GET` | `/os/list-dir` | 目录树浏览 |
+| `POST` | `/os/create-symlink` | 创建符号链接（junction） |
+| `GET` | `/os/icon/:software_id` | 获取软件 exe 图标 |
 
 ## 许可证
 
