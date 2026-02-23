@@ -1,8 +1,34 @@
 <template>
   <div>
     <div class="flex items-center justify-between mb-6">
-      <h2 class="text-xl font-bold text-gray-900">工作区</h2>
+      <div class="flex items-center gap-3">
+        <!-- 状态筛选（标题左侧） -->
+        <select
+          v-model="filterStatus"
+          class="px-2 py-1.5 text-xs border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          @change="loadList"
+        >
+          <option value="">全部状态</option>
+          <option value="not_started">未开始</option>
+          <option value="active">进行中</option>
+          <option value="completed">已完成</option>
+          <option value="archived">已归档</option>
+        </select>
+        <h2 class="text-xl font-bold text-gray-900">工作区</h2>
+        <span v-if="dirFilter" class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full truncate max-w-[200px]" :title="dirFilter">
+          {{ dirFilterLabel }}
+        </span>
+      </div>
       <div class="flex items-center gap-2">
+        <!-- 时间分组 -->
+        <select
+          v-model="groupBy"
+          class="px-2 py-1.5 text-xs border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        >
+          <option value="none">不分组</option>
+          <option value="year">按年分组</option>
+          <option value="month">按月分组</option>
+        </select>
         <!-- 多选模式切换 -->
         <button
           class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
@@ -13,50 +39,60 @@
         >
           {{ selectMode ? '取消选择' : '多选' }}
         </button>
-        <!-- 批量删除按钮 -->
+        <!-- 多选模式下立即显示的批量操作按钮 -->
+        <template v-if="selectMode">
+          <!-- 全选 -->
+          <button
+            class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            @click="toggleSelectAll"
+          >
+            {{ selectedIds.size === items.length ? '取消全选' : '全选' }}
+          </button>
+          <!-- 批量删除按钮 -->
+          <button
+            class="px-3 py-1.5 text-xs font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="selectedIds.size === 0"
+            @click="batchDelete"
+          >
+            删除选中 ({{ selectedIds.size }})
+          </button>
+          <!-- 批量设置状态 -->
+          <select
+            class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="selectedIds.size === 0"
+            @change="handleBatchStatus($event)"
+          >
+            <option value="" selected disabled>批量设置状态...</option>
+            <option value="not_started">未开始</option>
+            <option value="active">进行中</option>
+            <option value="completed">已完成</option>
+            <option value="archived">已归档</option>
+          </select>
+        </template>
         <button
-          v-if="selectMode && selectedIds.size > 0"
-          class="px-3 py-1.5 text-xs font-medium text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors"
-          @click="batchDelete"
+          v-if="itemsWithoutDescription.length > 0 && !bulkGenerating"
+          class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
+          @click="bulkGenerate"
         >
-          删除选中 ({{ selectedIds.size }})
+          AI 批量生成描述 ({{ itemsWithoutDescription.length }})
         </button>
-        <!-- 批量设置状态 -->
-        <select
-          v-if="selectMode && selectedIds.size > 0"
-          class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-600"
-          @change="handleBatchStatus($event)"
-        >
-          <option value="" selected disabled>批量设置状态...</option>
-          <option value="not_started">未开始</option>
-          <option value="active">进行中</option>
-          <option value="completed">已完成</option>
-          <option value="archived">已归档</option>
-        </select>
-        <!-- 全选 -->
         <button
-          v-if="selectMode"
-          class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-          @click="toggleSelectAll"
-        >
-          {{ selectedIds.size === items.length ? '取消全选' : '全选' }}
-        </button>
-        <select
-          v-model="filterStatus"
-          class="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          @change="loadList"
-        >
-          <option value="">全部状态</option>
-          <option value="not_started">未开始</option>
-          <option value="active">进行中</option>
-          <option value="completed">已完成</option>
-          <option value="archived">已归档</option>
-        </select>
-        <button
+          v-if="bulkGenerating"
           class="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
+          @click="stopBulkGenerate"
+        >
+          停止生成 ({{ bulkProgress }}/{{ bulkTotal }})
+        </button>
+        <button
+          class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+          title="清理死链"
           @click="cleanupDead"
         >
-          清理死链
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" />
+            <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
         </button>
         <button
           class="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
@@ -74,22 +110,59 @@
     </div>
     <template v-else>
       <!-- 非归档内容 -->
-      <div v-if="activeItems.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <WorkspaceCard
-          v-for="ws in activeItems"
-          :key="ws.id"
-          :workspace="ws"
-          :selectable="selectMode"
-          :selected="selectedIds.has(ws.id)"
-          @open-dir="handleOpenDir"
-          @edit="openEditDialog"
-          @delete="handleDelete"
-          @toggle-select="toggleSelect"
-        />
-      </div>
-      <div v-else-if="archivedItems.length > 0" class="text-center py-8 text-gray-400 text-sm">
-        所有工作区均已归档
-      </div>
+      <template v-if="groupBy === 'none'">
+        <div v-if="activeItems.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <WorkspaceCard
+            v-for="ws in activeItems"
+            :key="ws.id"
+            :workspace="ws"
+            :selectable="selectMode"
+            :selected="selectedIds.has(ws.id)"
+            @open-dir="handleOpenDir"
+            @edit="openEditDialog"
+            @delete="handleDelete"
+            @toggle-select="toggleSelect"
+          />
+        </div>
+        <div v-else-if="archivedItems.length > 0" class="text-center py-8 text-gray-400 text-sm">
+          所有工作区均已归档
+        </div>
+      </template>
+
+      <!-- 时间分组模式 -->
+      <template v-else>
+        <div v-if="groupedActive.length === 0 && archivedItems.length > 0" class="text-center py-8 text-gray-400 text-sm">
+          所有工作区均已归档
+        </div>
+        <div v-for="group in groupedActive" :key="group.label" class="mb-6">
+          <button
+            class="flex items-center gap-2 mb-3 text-sm font-semibold text-gray-500 hover:text-gray-700 transition-colors"
+            @click="toggleGroup(group.label)"
+          >
+            <svg
+              class="w-3.5 h-3.5 transition-transform duration-200"
+              :class="collapsedGroups.has(group.label) ? '-rotate-90' : ''"
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+            {{ group.label }} ({{ group.items.length }})
+          </button>
+          <div v-if="!collapsedGroups.has(group.label)" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <WorkspaceCard
+              v-for="ws in group.items"
+              :key="ws.id"
+              :workspace="ws"
+              :selectable="selectMode"
+              :selected="selectedIds.has(ws.id)"
+              @open-dir="handleOpenDir"
+              @edit="openEditDialog"
+              @delete="handleDelete"
+              @toggle-select="toggleSelect"
+            />
+          </div>
+        </div>
+      </template>
 
       <!-- 归档折叠区域 -->
       <div v-if="archivedItems.length > 0" class="mt-6">
@@ -142,17 +215,46 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { getWorkspaceList, deleteWorkspace, openDir, cleanupDeadWorkspaces, batchDeleteWorkspaces, batchUpdateWorkspaceStatus } from '@/api'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { getWorkspaceList, deleteWorkspace, openDir, cleanupDeadWorkspaces, batchDeleteWorkspaces, batchUpdateWorkspaceStatus, generateWorkspaceDescription } from '@/api'
 import type { Workspace } from '@/api'
 import WorkspaceCard from '@/components/WorkspaceCard.vue'
 import WorkspaceDialog from '@/components/WorkspaceDialog.vue'
 
-const items = ref<Workspace[]>([])
+const route = useRoute()
+const router = useRouter()
+
+const allItems = ref<Workspace[]>([])
 const loading = ref(true)
 const filterStatus = ref('')
 const dialogOpen = ref(false)
 const editingWorkspace = ref<Workspace | null>(null)
+
+// 按目录过滤
+const dirFilter = computed(() => (route.query.dir as string) || '')
+const dirFilterLabel = computed(() => {
+  if (!dirFilter.value) return ''
+  const segments = dirFilter.value.replace(/[\\/]+$/, '').split(/[\\/]/)
+  return segments[segments.length - 1] || dirFilter.value
+})
+
+// 最终展示的列表：先按目录过滤，再按状态过滤
+const items = computed(() => {
+  if (!dirFilter.value) return allItems.value
+  const prefix = dirFilter.value.replace(/[\\/]+$/, '').toLowerCase()
+  return allItems.value.filter((w) => {
+    const wp = w.directory_path.replace(/[\\/]+$/, '').toLowerCase()
+    return wp === prefix || wp.startsWith(prefix + '\\') || wp.startsWith(prefix + '/')
+  })
+})
+
+// 当 dir 查询参数变化时重新刷新（触发 computed 即可）
+watch(() => route.query.dir, () => {
+  // items 是 computed，自动更新
+  // 但需要重置选中等状态
+  selectedIds.value = new Set()
+})
 
 // 多选状态
 const selectMode = ref(false)
@@ -160,6 +262,60 @@ const selectedIds = ref<Set<string>>(new Set())
 
 // 归档折叠
 const showArchived = ref(false)
+
+// 时间分组
+const groupBy = ref<'none' | 'year' | 'month'>(
+  (localStorage.getItem('linkhub_ws_groupBy') as 'none' | 'year' | 'month') || 'none'
+)
+const collapsedGroups = ref<Set<string>>(new Set())
+
+watch(groupBy, (v) => {
+  localStorage.setItem('linkhub_ws_groupBy', v)
+  collapsedGroups.value = new Set()
+})
+
+function toggleGroup(label: string) {
+  const newSet = new Set(collapsedGroups.value)
+  if (newSet.has(label)) {
+    newSet.delete(label)
+  } else {
+    newSet.add(label)
+  }
+  collapsedGroups.value = newSet
+}
+
+interface WorkspaceGroup {
+  label: string
+  sortKey: string
+  items: Workspace[]
+}
+
+const groupedActive = computed<WorkspaceGroup[]>(() => {
+  if (groupBy.value === 'none') return []
+  const groups = new Map<string, { label: string; sortKey: string; items: Workspace[] }>()
+
+  for (const ws of activeItems.value) {
+    const d = new Date(ws.created_at)
+    let label: string
+    let sortKey: string
+    if (groupBy.value === 'year') {
+      const y = d.getFullYear()
+      label = `${y} 年`
+      sortKey = `${y}`
+    } else {
+      const y = d.getFullYear()
+      const m = d.getMonth() + 1
+      label = `${y} 年 ${m} 月`
+      sortKey = `${y}-${String(m).padStart(2, '0')}`
+    }
+    if (!groups.has(sortKey)) {
+      groups.set(sortKey, { label, sortKey, items: [] })
+    }
+    groups.get(sortKey)!.items.push(ws)
+  }
+
+  return Array.from(groups.values()).sort((a, b) => b.sortKey.localeCompare(a.sortKey))
+})
 
 // 将工作区分为非归档和已归档两组（仅在未过滤归档状态时分组）
 const shouldSeparateArchived = computed(() => filterStatus.value !== 'archived')
@@ -243,7 +399,7 @@ async function loadList() {
     const params: Record<string, string> = {}
     if (filterStatus.value) params.status = filterStatus.value
     const { data } = await getWorkspaceList(params)
-    items.value = data.items
+    allItems.value = data.items
   } catch { /* ignore */ } finally {
     loading.value = false
   }
@@ -277,7 +433,7 @@ async function handleDelete(id: string) {
   if (!confirm('确定删除这个工作区记录吗?')) return
   try {
     await deleteWorkspace(id)
-    items.value = items.value.filter((w) => w.id !== id)
+    allItems.value = allItems.value.filter((w) => w.id !== id)
   } catch { /* ignore */ }
 }
 
@@ -290,5 +446,94 @@ async function cleanupDead() {
   } catch { /* ignore */ }
 }
 
-onMounted(loadList)
+// 批量生成状态
+const bulkGenerating = ref(false)
+const bulkProgress = ref(0)
+const bulkTotal = ref(0)
+let bulkAbort = false
+
+const itemsWithoutDescription = computed(() =>
+  items.value.filter((w) => !w.description && !w.is_missing)
+)
+
+function stopBulkGenerate() {
+  bulkAbort = true
+}
+
+async function bulkGenerate() {
+  const targets = itemsWithoutDescription.value
+  if (targets.length === 0) return
+  if (!confirm(`将为 ${targets.length} 个无描述的工作区生成 AI 描述，确定?`)) return
+
+  bulkGenerating.value = true
+  bulkTotal.value = targets.length
+  bulkProgress.value = 0
+  bulkAbort = false
+
+  let successCount = 0
+  let failCount = 0
+
+  for (const ws of targets) {
+    if (bulkAbort) break
+    try {
+      const { data } = await generateWorkspaceDescription(ws.id)
+      if (data.success) {
+        const idx = allItems.value.findIndex((w) => w.id === ws.id)
+        if (idx !== -1) {
+          allItems.value[idx] = { ...allItems.value[idx], description: data.description }
+        }
+        successCount++
+      } else {
+        failCount++
+      }
+    } catch {
+      failCount++
+    }
+    bulkProgress.value++
+  }
+
+  bulkGenerating.value = false
+  const stoppedMsg = bulkAbort ? '（已手动停止）' : ''
+  alert(`批量生成完成${stoppedMsg}：成功 ${successCount} 个，失败 ${failCount} 个`)
+}
+
+// 页面离开时自动停止批量生成
+onBeforeUnmount(() => {
+  bulkAbort = true
+})
+
+// 搜索高亮: 滚动到指定卡片并应用动画
+function scrollToHighlight(id: string) {
+  nextTick(() => {
+    const el = document.querySelector(`[data-id="${id}"]`) as HTMLElement | null
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('search-highlight')
+    setTimeout(() => el.classList.remove('search-highlight'), 2000)
+    // 清除 query param
+    router.replace({ query: { ...route.query, highlight: undefined } })
+  })
+}
+
+watch(() => route.query.highlight, (id) => {
+  if (id && typeof id === 'string') {
+    // 确保归档区域展开以找到卡片
+    const ws = allItems.value.find(w => w.id === id)
+    if (ws && ws.status === 'archived') {
+      showArchived.value = true
+    }
+    scrollToHighlight(id)
+  }
+})
+
+onMounted(async () => {
+  await loadList()
+  if (route.query.highlight) {
+    const ws = allItems.value.find(w => w.id === route.query.highlight)
+    if (ws && ws.status === 'archived') {
+      showArchived.value = true
+    }
+    scrollToHighlight(route.query.highlight as string)
+  }
+})
 </script>

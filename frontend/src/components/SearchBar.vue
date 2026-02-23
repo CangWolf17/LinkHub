@@ -71,7 +71,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { semanticSearch, launchApp, openDir } from '@/api'
+import { semanticSearch } from '@/api'
 import type { SearchResultItem } from '@/api'
 
 const router = useRouter()
@@ -122,14 +122,11 @@ function clearSearch() {
 
 function onResultClick(item: SearchResultItem) {
   showResults.value = false
-  if (item.is_missing) return
+  query.value = ''
+  results.value = []
+  hasSearched.value = false
 
-  if (item.type === 'software') {
-    launchApp(item.path).catch(() => {})
-  } else {
-    openDir(item.path).catch(() => {})
-  }
-  // 同时导航到对应视图
-  router.push(item.type === 'software' ? '/software' : '/workspaces')
+  const targetRoute = item.type === 'software' ? '/software' : '/workspaces'
+  router.push({ path: targetRoute, query: { highlight: item.id } })
 }
 </script>

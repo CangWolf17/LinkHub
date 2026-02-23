@@ -1,5 +1,6 @@
 <template>
   <div
+    :data-id="workspace.id"
     class="bg-white rounded-xl border shadow-sm overflow-hidden transition-all hover:shadow-md"
     :class="cardBorderClass"
   >

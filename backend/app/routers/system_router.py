@@ -207,7 +207,7 @@ async def export_config(db: AsyncSession = Depends(get_db)):
             settings[row.key] = parse_allowed_dirs(row.value)
         else:
             settings[row.key] = row.value
-    settings["_export_version"] = "1"
+    settings["_export_version"] = "2"
     settings["_export_source"] = "LinkHub"
     return settings
 
@@ -223,20 +223,45 @@ async def import_config(
     """
     导入配置 JSON，批量覆盖 system_settings 表。
     忽略敏感字段和元数据字段。
+
+    兼容处理:
+      - v1 格式: allowed_dirs 为字符串数组 ["C:/path1"] -> 自动转为 [{"path": "...", "type": "software"}]
+      - 缺失字段: 不覆盖已有值（仅导入文件中存在的 key）
+      - 未知字段: 静默跳过（不报错）
     """
     # 过滤掉元数据字段和敏感字段
     skip_keys = _SENSITIVE_KEYS | {"_export_version", "_export_source"}
     imported_keys = []
+    skipped_keys = []
 
     for key, value in config.items():
         if key in skip_keys:
             continue
+        if key.startswith("_"):
+            skipped_keys.append(key)
+            continue
 
-        # allowed_dirs 特殊处理：结构化数据 → JSON 字符串
+        # allowed_dirs 特殊处理：兼容新旧格式
         if key == "allowed_dirs" and isinstance(value, list):
-            str_value = serialize_allowed_dirs(value)
+            # 规范化: 可能是 ["path1", "path2"] 或 [{"path": "...", "type": "..."}]
+            normalized = []
+            for item in value:
+                if isinstance(item, dict):
+                    p = str(item.get("path", "")).strip()
+                    t = str(item.get("type", "software")).strip()
+                    if p and t in VALID_DIR_TYPES:
+                        normalized.append({"path": p, "type": t})
+                elif isinstance(item, str):
+                    p = item.strip()
+                    if p:
+                        normalized.append({"path": p, "type": "software"})
+            str_value = serialize_allowed_dirs(normalized)
         elif isinstance(value, (dict, list)):
             str_value = json.dumps(value, ensure_ascii=False)
+        elif value is None:
+            # 跳过 null 值，不覆盖已有配置
+            skipped_keys.append(key)
+            continue
         else:
             str_value = str(value)
 
@@ -250,7 +275,12 @@ async def import_config(
 
     await db.flush()
     await db.commit()
-    logger.info("配置已导入，共 %d 项: %s", len(imported_keys), imported_keys)
+    logger.info(
+        "配置已导入，共 %d 项: %s (跳过: %s)",
+        len(imported_keys),
+        imported_keys,
+        skipped_keys,
+    )
     return {
         "message": f"已导入 {len(imported_keys)} 项配置",
         "imported_keys": imported_keys,

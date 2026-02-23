@@ -2,6 +2,7 @@
   <div>
     <!-- SoftwareCard: 软件卡片组件 -->
     <div
+      :data-id="software.id"
       class="bg-white rounded-xl border shadow-sm overflow-hidden transition-all hover:shadow-md"
       :class="software.is_missing ? 'border-gray-300 opacity-60' : 'border-gray-200'"
     >
@@ -114,10 +115,10 @@
                 </svg>
               </button>
               <button
-                v-if="software.executable_path"
+                v-if="software.executable_path || software.install_dir"
                 class="p-1 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                 title="打开所在文件夹"
-                @click="$emit('open-dir', parentDir)"
+                @click="$emit('open-dir', folderPath)"
               >
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
@@ -197,6 +198,12 @@ const parentDir = computed(() => {
   const parts = props.software.executable_path.split(sep)
   parts.pop() // remove filename
   return parts.join(sep)
+})
+
+const folderPath = computed(() => {
+  // Prefer parent dir of executable_path, fallback to install_dir
+  if (parentDir.value) return parentDir.value
+  return props.software.install_dir || ''
 })
 
 const parsedTags = computed(() => {

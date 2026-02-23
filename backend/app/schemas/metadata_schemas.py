@@ -16,6 +16,7 @@ class SoftwareCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255, description="软件名称")
     executable_path: str = Field(..., description="可执行文件绝对路径")
+    install_dir: str | None = Field(None, description="安装目录路径")
     description: str | None = Field(None, description="软件描述（可由 LLM 生成）")
     tags: str | None = Field(None, description="标签，JSON 数组字符串")
     icon_path: str | None = Field(None, description="图标路径")
@@ -26,6 +27,7 @@ class SoftwareUpdate(BaseModel):
 
     name: str | None = Field(None, min_length=1, max_length=255)
     executable_path: str | None = None
+    install_dir: str | None = None
     description: str | None = None
     tags: str | None = None
     icon_path: str | None = None
@@ -37,10 +39,12 @@ class SoftwareResponse(BaseModel):
     id: str
     name: str
     executable_path: str
+    install_dir: str | None = None
     description: str | None = None
     tags: str | None = None
     icon_path: str | None = None
     is_missing: bool = Field(False, description="可执行文件路径是否已失效（死链）")
+    last_used_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -132,5 +136,25 @@ class GenerateDescriptionResponse(BaseModel):
 
     success: bool
     description: str = Field("", description="生成的描述文本")
+    model: str = Field("", description="使用的模型")
+    message: str = ""
+
+
+# ── 工作区 AI 表单填充 Schemas ────────────────────────────
+
+
+class AiFillFormRequest(BaseModel):
+    """AI 自动填充工作区表单请求"""
+
+    directory_path: str = Field(..., description="工作区目录路径")
+
+
+class AiFillFormResponse(BaseModel):
+    """AI 自动填充工作区表单响应"""
+
+    success: bool
+    name: str = Field("", description="清洗后的项目名称")
+    description: str = Field("", description="生成的项目描述")
+    deadline: str | None = Field(None, description="提取到的日期 (YYYY-MM-DD) 或 None")
     model: str = Field("", description="使用的模型")
     message: str = ""

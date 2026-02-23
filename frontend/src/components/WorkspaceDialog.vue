@@ -2,9 +2,23 @@
   <!-- 弹窗遮罩 -->
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="$emit('close')">
     <div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
-      <h3 class="text-lg font-bold text-gray-900 mb-5">
-        {{ isEdit ? '编辑工作区' : '新建工作区' }}
-      </h3>
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="text-lg font-bold text-gray-900">
+          {{ isEdit ? '编辑工作区' : '新建工作区' }}
+        </h3>
+        <button
+          v-if="!isEdit"
+          class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-purple-600 hover:bg-purple-50 rounded-lg transition-colors disabled:opacity-50"
+          :disabled="aiFilling"
+          :title="aiFilling ? 'AI 填充中...' : 'AI 根据目录路径自动填充表单'"
+          @click="handleAiFill"
+        >
+          <svg class="w-3.5 h-3.5" :class="aiFilling ? 'animate-pulse' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+          </svg>
+          {{ aiFilling ? 'AI 填充中...' : 'AI 填充' }}
+        </button>
+      </div>
 
       <div class="space-y-4">
         <!-- 名称 -->
@@ -16,6 +30,9 @@
             placeholder="项目名称"
             class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
+          <p v-if="!isEdit" class="mt-1 text-[11px] text-gray-400">
+            支持日期变量: %date%, %yyyy%, %mm%, %dd%
+          </p>
         </div>
 
         <!-- 目录路径 -->
@@ -130,9 +147,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { createWorkspace, updateWorkspace, generateWorkspaceDescription } from '@/api'
-import type { Workspace } from '@/api'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { createWorkspace, updateWorkspace, generateWorkspaceDescription, getAllowedDirs, aiWorkspaceFillForm } from '@/api'
+import type { Workspace, DirEntry } from '@/api'
 import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
 import AiPromptDialog from '@/components/AiPromptDialog.vue'
 
@@ -158,15 +175,14 @@ const form = reactive({
 const saving = ref(false)
 const error = ref('')
 const generatingDesc = ref(false)
+const aiFilling = ref(false)
 const showFolderPicker = ref(false)
 const showAiDialog = ref(false)
 
-function onFolderPicked(path: string) {
-  form.directory_path = path
-  showFolderPicker.value = false
-}
+// 工作区白名单目录（用于自动补全路径）
+const workspaceDirs = ref<string[]>([])
 
-onMounted(() => {
+onMounted(async () => {
   if (props.workspace) {
     form.name = props.workspace.name
     form.directory_path = props.workspace.directory_path
@@ -176,7 +192,48 @@ onMounted(() => {
       : ''
     form.status = props.workspace.status
   }
+
+  // 加载白名单目录
+  try {
+    const { data } = await getAllowedDirs()
+    workspaceDirs.value = data.allowed_dirs
+      .filter((d: DirEntry) => d.type === 'workspace')
+      .map((d: DirEntry) => d.path.replace(/\/$/, '').replace(/\\$/, ''))
+  } catch { /* ignore */ }
 })
+
+// 新建模式下：name 变化时自动拼接路径
+watch(() => form.name, (newName) => {
+  if (isEdit.value) return
+  if (!newName.trim()) return
+  // 仅当路径为空或路径等于某个白名单目录（未手动修改过）时，才自动补全
+  const trimmedPath = form.directory_path.replace(/[\\/]$/, '')
+  const isBaseDir = !trimmedPath || workspaceDirs.value.includes(trimmedPath)
+  if (isBaseDir && workspaceDirs.value.length > 0) {
+    const sep = workspaceDirs.value[0].includes('/') ? '/' : '\\'
+    form.directory_path = workspaceDirs.value[0] + sep + newName.trim()
+  }
+})
+
+/**
+ * 日期转义: 将 %date%, %yyyy%, %mm%, %dd% 等替换为实际日期
+ */
+function escapeDateTokens(str: string): string {
+  const now = new Date()
+  const yyyy = String(now.getFullYear())
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  const dd = String(now.getDate()).padStart(2, '0')
+  return str
+    .replace(/%date%/gi, `${yyyy}-${mm}-${dd}`)
+    .replace(/%yyyy%/gi, yyyy)
+    .replace(/%mm%/gi, mm)
+    .replace(/%dd%/gi, dd)
+}
+
+function onFolderPicked(path: string) {
+  form.directory_path = path
+  showFolderPicker.value = false
+}
 
 async function handleGenerateDescription() {
   if (!props.workspace || generatingDesc.value) return
@@ -207,6 +264,31 @@ async function doGenerateDescription(payload: { customPrompt: string; mode: 'app
   }
 }
 
+async function handleAiFill() {
+  if (aiFilling.value) return
+  if (!form.directory_path.trim()) {
+    error.value = '请先填写目录路径，AI 需要根据目录路径推断表单内容'
+    return
+  }
+  aiFilling.value = true
+  error.value = ''
+  try {
+    const { data } = await aiWorkspaceFillForm(form.directory_path.trim())
+    if (data.success) {
+      if (data.name) form.name = data.name
+      if (data.description) form.description = data.description
+      if (data.deadline) form.deadline = data.deadline
+    } else {
+      error.value = data.message || 'AI 填充失败'
+    }
+  } catch (e: unknown) {
+    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'AI 填充失败，请检查 LLM 配置'
+    error.value = typeof detail === 'string' ? detail : JSON.stringify(detail)
+  } finally {
+    aiFilling.value = false
+  }
+}
+
 async function save() {
   error.value = ''
 
@@ -216,8 +298,8 @@ async function save() {
   saving.value = true
   try {
     const payload: Record<string, unknown> = {
-      name: form.name.trim(),
-      directory_path: form.directory_path.trim(),
+      name: escapeDateTokens(form.name.trim()),
+      directory_path: escapeDateTokens(form.directory_path.trim()),
       description: form.description.trim() || null,
       status: form.status,
     }

@@ -15,6 +15,7 @@ Pipeline: 接收文件 → 解压 → 启发式寻址 → LLM 描述 → 入库 
 import logging
 import os
 import shutil
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -68,6 +69,47 @@ def _extract_zip(archive_path: Path, target_dir: Path) -> None:
     """解压 zip 文件到目标目录。"""
     with zipfile.ZipFile(archive_path, "r") as zf:
         zf.extractall(target_dir)
+
+
+def _extract_tar(archive_path: Path, target_dir: Path) -> None:
+    """解压 tar/tar.gz/tar.bz2/tar.xz 文件到目标目录。"""
+    with tarfile.open(archive_path, "r:*") as tf:
+        tf.extractall(target_dir, filter="data")
+
+
+def _extract_7z(archive_path: Path, target_dir: Path) -> None:
+    """解压 7z 文件到目标目录（需要 py7zr 库）。"""
+    try:
+        import py7zr
+
+        with py7zr.SevenZipFile(archive_path, mode="r") as z:
+            z.extractall(path=target_dir)
+    except ImportError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="7z 解压需要 py7zr 库，当前未安装。请使用 zip 或 tar.gz 格式。",
+        )
+
+
+SUPPORTED_ARCHIVE_SUFFIXES = {".zip", ".7z", ".tar", ".gz", ".tgz", ".bz2", ".xz"}
+
+
+def _extract_archive(archive_path: Path, target_dir: Path) -> None:
+    """根据文件后缀选择解压方式。"""
+    name = archive_path.name.lower()
+    suffix = archive_path.suffix.lower()
+
+    if suffix == ".zip":
+        _extract_zip(archive_path, target_dir)
+    elif suffix == ".7z":
+        _extract_7z(archive_path, target_dir)
+    elif suffix in (".gz", ".tgz", ".bz2", ".xz", ".tar") or ".tar." in name:
+        _extract_tar(archive_path, target_dir)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的压缩格式: {suffix}",
+        )
 
 
 def _find_executables(directory: Path) -> list[Path]:
@@ -261,15 +303,23 @@ async def upload_and_install(
 
     filename = file.filename
     suffix = Path(filename).suffix.lower()
+    name_lower = filename.lower()
 
-    if suffix != ".zip":
+    # 支持 .zip, .7z, .tar.gz, .tar.bz2, .tar.xz, .tgz
+    is_supported = suffix in (".zip", ".7z", ".tar", ".tgz") or any(
+        name_lower.endswith(ext) for ext in (".tar.gz", ".tar.bz2", ".tar.xz")
+    )
+    if not is_supported:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"当前仅支持 .zip 格式，收到: {suffix}",
+            detail=f"不支持的格式: {suffix}，支持 .zip / .7z / .tar.gz / .tar.bz2 / .tar.xz",
         )
 
-    # 从文件名推断软件名（去除后缀）
+    # 从文件名推断软件名（去除后缀，包括双后缀如 .tar.gz）
     software_name = Path(filename).stem
+    for double_ext in (".tar",):
+        if software_name.lower().endswith(double_ext):
+            software_name = software_name[: -len(double_ext)]
 
     # ── 2. 确定安装目录并保存文件 ────────────────────────
     base_dir = await _get_install_base_dir(db)
@@ -298,13 +348,21 @@ async def upload_and_install(
         install_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            _extract_zip(temp_archive, install_dir)
+            _extract_archive(temp_archive, install_dir)
         except zipfile.BadZipFile:
             # 清理
             shutil.rmtree(install_dir, ignore_errors=True)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="无效的 ZIP 文件",
+                detail="无效的压缩文件",
+            )
+        except (tarfile.TarError, Exception) as exc:
+            if isinstance(exc, HTTPException):
+                raise
+            shutil.rmtree(install_dir, ignore_errors=True)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"解压失败: {exc}",
             )
 
         # 处理单层嵌套目录（zip 内只有一个顶层文件夹的情况）
@@ -338,6 +396,7 @@ async def upload_and_install(
         item = PortableSoftware(
             name=software_name,
             executable_path=exe_path_str,
+            install_dir=str(install_dir),
             description=description or None,
         )
         db.add(item)
@@ -492,6 +551,7 @@ async def scan_and_import(
                 item = PortableSoftware(
                     name=software_name,
                     executable_path=exe_path_str,
+                    install_dir=str(subdir),
                     description=description or None,
                 )
                 db.add(item)

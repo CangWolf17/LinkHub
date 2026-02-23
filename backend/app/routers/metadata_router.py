@@ -21,6 +21,8 @@ from app.core.database import get_db
 from app.core.llm_helpers import get_async_openai_client, load_llm_config
 from app.models.models import PortableSoftware, SystemSetting, Workspace
 from app.schemas.metadata_schemas import (
+    AiFillFormRequest,
+    AiFillFormResponse,
     GenerateDescriptionRequest,
     GenerateDescriptionResponse,
     SoftwareCreate,
@@ -113,10 +115,14 @@ def _to_software_response(item: PortableSoftware) -> SoftwareResponse:
         id=item.id,
         name=item.name,
         executable_path=item.executable_path,
+        install_dir=item.install_dir,
         description=item.description,
         tags=item.tags,
         icon_path=item.icon_path,
-        is_missing=_check_path_missing(item.executable_path),
+        is_missing=_check_path_missing(item.executable_path)
+        if item.executable_path
+        else (_check_path_missing(item.install_dir) if item.install_dir else True),
+        last_used_at=item.last_used_at,
         created_at=item.created_at,
         updated_at=item.updated_at,
     )
@@ -156,6 +162,7 @@ async def create_software(
     item = PortableSoftware(
         name=req.name,
         executable_path=req.executable_path,
+        install_dir=req.install_dir,
         description=req.description,
         tags=req.tags,
         icon_path=req.icon_path,
@@ -176,7 +183,7 @@ async def create_software(
 )
 async def list_software(
     skip: int = Query(0, ge=0, description="分页偏移量"),
-    limit: int = Query(50, ge=1, le=200, description="每页数量"),
+    limit: int = Query(50, ge=1, le=9999, description="每页数量"),
     search: str | None = Query(None, description="按名称模糊搜索"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -244,10 +251,10 @@ async def cleanup_dead_software(
 
     removed = []
     for item in items:
-        if _check_path_missing(item.executable_path):
-            removed.append(
-                {"id": item.id, "name": item.name, "path": item.executable_path}
-            )
+        # 使用 executable_path 检测死链，若为空则用 install_dir
+        check_path = item.executable_path or item.install_dir
+        if check_path and _check_path_missing(check_path):
+            removed.append({"id": item.id, "name": item.name, "path": check_path})
             await db.delete(item)
 
     await db.commit()
@@ -379,8 +386,12 @@ async def generate_software_description(
         )
 
     # 构建 prompt — 收集目录上下文丰富 LLM 输入
-    exe_path = Path(item.executable_path)
-    dir_context = _collect_dir_context(exe_path.parent)
+    exe_path = Path(item.executable_path) if item.executable_path else None
+    dir_context = ""
+    if exe_path:
+        dir_context = _collect_dir_context(exe_path.parent)
+    elif item.install_dir:
+        dir_context = _collect_dir_context(Path(item.install_dir))
 
     custom_prompt = req.custom_prompt if req and req.custom_prompt else None
     prompt_mode = req.mode if req else "append"
@@ -512,6 +523,118 @@ async def generate_software_description(
         )
 
 
+@router.post(
+    "/software/{software_id}/generate-tags",
+    summary="使用 LLM 为软件生成类型标签",
+)
+async def generate_software_tags(
+    software_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    调用 LLM 根据软件名称、描述和路径信息推断软件类型标签。
+    返回 JSON 数组字符串并保存到数据库。
+    """
+    import json as _json
+
+    result = await db.execute(
+        select(PortableSoftware).where(PortableSoftware.id == software_id)
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"软件记录不存在: {software_id}",
+        )
+
+    config = await load_llm_config(db)
+    client = get_async_openai_client(config)
+    model = config.get("model_chat", "").strip()
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM 未配置: model_chat 为空。",
+        )
+
+    exe_path = Path(item.executable_path) if item.executable_path else None
+    dir_context = ""
+    if exe_path:
+        dir_context = _collect_dir_context(exe_path.parent)
+    elif item.install_dir:
+        dir_context = _collect_dir_context(Path(item.install_dir))
+
+    context_block = f"\n\n目录文件信息:\n{dir_context}" if dir_context else ""
+
+    user_content = (
+        f"软件名称: {item.name}\n"
+        f"软件描述: {item.description or '无'}\n"
+        f"可执行文件路径: {item.executable_path or '无'}"
+        f"{context_block}"
+    )
+
+    system_prompt = (
+        "你是一个软件分类助手。根据提供的软件信息，为它分配1-3个类型标签。"
+        "标签应该简洁，如：开发工具、文本编辑器、图像处理、网络工具、系统工具、"
+        "多媒体、浏览器、压缩工具、下载工具、数据库工具、IDE、终端工具、"
+        "文件管理、安全工具、科学计算、游戏、办公软件等。"
+        '只返回一个 JSON 数组，例如 ["开发工具", "文本编辑器"]，不要附加任何解释。'
+    )
+
+    try:
+        max_tokens = int(config.get("llm_max_tokens", "256"))
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.3,
+            max_tokens=min(max_tokens, 256),
+        )
+
+        tags_str = ""
+        if response.choices:
+            raw_content = (response.choices[0].message.content or "").strip()
+            # 尝试提取 JSON 数组
+            try:
+                tags = _json.loads(raw_content)
+                if isinstance(tags, list):
+                    tags_str = _json.dumps(tags, ensure_ascii=False)
+            except _json.JSONDecodeError:
+                # 尝试从文本中提取 [...] 部分
+                import re
+
+                match = re.search(r"\[.*?\]", raw_content, re.DOTALL)
+                if match:
+                    try:
+                        tags = _json.loads(match.group())
+                        if isinstance(tags, list):
+                            tags_str = _json.dumps(tags, ensure_ascii=False)
+                    except _json.JSONDecodeError:
+                        pass
+
+        if not tags_str:
+            return {"success": False, "tags": "", "message": "LLM 未返回有效标签"}
+
+        item.tags = tags_str
+        item.updated_at = datetime.now(timezone.utc)
+        await db.flush()
+        await db.refresh(item)
+        await db.commit()
+
+        logger.info("LLM 生成软件标签: %s -> %s", item.name, tags_str)
+        return {"success": True, "tags": tags_str, "message": "标签生成成功"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("LLM 生成软件标签失败: %s -> %s", item.name, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LLM 调用失败: {e}",
+        )
+
+
 # ══════════════════════════════════════════════════════════
 #  工作区 CRUD
 # ══════════════════════════════════════════════════════════
@@ -551,7 +674,7 @@ async def create_workspace(
 )
 async def list_workspaces(
     skip: int = Query(0, ge=0, description="分页偏移量"),
-    limit: int = Query(50, ge=1, le=200, description="每页数量"),
+    limit: int = Query(50, ge=1, le=9999, description="每页数量"),
     search: str | None = Query(None, description="按名称模糊搜索"),
     status_filter: str | None = Query(None, alias="status", description="按状态过滤"),
     db: AsyncSession = Depends(get_db),
@@ -1022,6 +1145,136 @@ async def generate_workspace_description(
         raise
     except Exception as e:
         logger.error("LLM 生成工作区描述失败: %s -> %s", item.name, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LLM 调用失败: {e}",
+        )
+
+
+# ── AI 自动填充工作区表单 ────────────────────────────────────
+
+
+@router.post(
+    "/workspaces/ai-fill-form",
+    response_model=AiFillFormResponse,
+    summary="AI 自动填充工作区表单",
+)
+async def ai_fill_workspace_form(
+    req: AiFillFormRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    根据目录路径，使用 LLM 推断并返回:
+      - name: 清洗后的可读项目名称（去掉日期前缀、下划线等）
+      - description: 1-2 句项目描述
+      - deadline: 从目录名中提取的日期 (YYYY-MM-DD)，如果没有则为 null
+    不会写入数据库，仅返回建议值供前端填充。
+    """
+    import json
+    import re
+
+    config = await load_llm_config(db)
+    client = get_async_openai_client(config)
+    model = config.get("model_chat", "gpt-3.5-turbo")
+
+    dir_path = Path(req.directory_path)
+    dir_name = dir_path.name
+    dir_context = _collect_dir_context(dir_path) if dir_path.is_dir() else ""
+    context_block = f"\n\n目录文件信息:\n{dir_context}" if dir_context else ""
+
+    system_prompt = (
+        "你是一个项目表单填充助手。根据用户提供的工作区目录名和目录内容，返回以下 JSON 格式的填充建议:\n"
+        "{\n"
+        '  "name": "清洗后的可读项目名称（去掉日期前缀如 2024-01-01_、编号前缀、下划线/连字符等，保留有意义的项目名）",\n'
+        '  "description": "1-2句简洁中文描述，说明项目用途和特点",\n'
+        '  "deadline": "从目录名中提取的日期 YYYY-MM-DD 格式，如果目录名中没有日期则为 null"\n'
+        "}\n\n"
+        "规则:\n"
+        "1. name 应简洁易读，如 '2024-03-15_MyProject_v2' → 'MyProject v2'\n"
+        "2. 如果目录名含日期（如 20240315、2024-03-15、2024_0315），提取到 deadline 字段\n"
+        "3. description 应基于目录内容推断项目性质，如果目录不存在或为空则根据名称推断\n"
+        "4. 只返回 JSON，不要附加任何解释"
+    )
+
+    user_content = (
+        f"目录名: {dir_name}\n目录完整路径: {req.directory_path}{context_block}"
+    )
+
+    logger.info("[LLM-REQ] AI 填充工作区表单 | dir=%s", dir_name)
+
+    try:
+        max_tokens = int(config.get("llm_max_tokens", "1024"))
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.3,
+            max_tokens=max_tokens,
+        )
+
+        content = ""
+        if response.choices:
+            content = (response.choices[0].message.content or "").strip()
+
+        if not content:
+            return AiFillFormResponse(
+                success=False,
+                message="LLM 返回了空内容",
+                model=model,
+            )
+
+        # 提取 JSON（兼容 markdown ```json ... ``` 包裹）
+        json_match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
+        if not json_match:
+            logger.warning("[LLM-PARSE] 无法从响应中提取 JSON: %s", content[:200])
+            return AiFillFormResponse(
+                success=False,
+                message=f"无法解析 LLM 响应为 JSON: {content[:100]}",
+                model=getattr(response, "model", model) or model,
+            )
+
+        parsed = json.loads(json_match.group())
+        name = str(parsed.get("name", dir_name)).strip()
+        description = str(parsed.get("description", "")).strip()
+        deadline = parsed.get("deadline")
+
+        # 校验 deadline 格式
+        if deadline:
+            deadline = str(deadline).strip()
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", deadline):
+                deadline = None
+            elif deadline.lower() == "null":
+                deadline = None
+
+        logger.info(
+            "[LLM-RES] AI 填充表单 | name=%s | deadline=%s | desc=%s",
+            name,
+            deadline,
+            description[:50],
+        )
+
+        return AiFillFormResponse(
+            success=True,
+            name=name,
+            description=description,
+            deadline=deadline,
+            model=getattr(response, "model", model) or model,
+            message="表单填充成功",
+        )
+
+    except json.JSONDecodeError as e:
+        logger.error("AI 填充表单 JSON 解析失败: %s", e)
+        return AiFillFormResponse(
+            success=False,
+            message=f"LLM 响应 JSON 解析失败: {e}",
+            model=model,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("AI 填充工作区表单失败: %s", e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"LLM 调用失败: {e}",

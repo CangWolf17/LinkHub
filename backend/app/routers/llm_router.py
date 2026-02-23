@@ -11,7 +11,8 @@
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,6 +108,40 @@ async def update_llm_config(
     )
 
 
+@router.get(
+    "/health",
+    summary="LLM 健康检查（不消耗 token）",
+)
+async def llm_health_check(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    轻量级 LLM 连通性检查：调用 /models 端点列出可用模型。
+    不发送任何 chat 请求，不消耗 token。
+    """
+    config = await load_llm_config(db)
+
+    try:
+        client = get_async_openai_client(config)
+    except HTTPException:
+        raise
+
+    try:
+        models_resp = await client.models.list()
+        model_ids = [m.id for m in models_resp.data[:10]]  # 最多返回前 10 个模型名
+        return {
+            "success": True,
+            "message": f"LLM 服务连接正常，可用模型 {len(models_resp.data)} 个",
+            "models": model_ids,
+        }
+    except Exception as e:
+        logger.error("LLM 健康检查失败: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LLM 连接失败: {e}",
+        )
+
+
 @router.post(
     "/test-connection",
     summary="测试 LLM 连接",
@@ -114,7 +149,7 @@ async def update_llm_config(
 async def test_llm_connection(
     db: AsyncSession = Depends(get_db),
 ):
-    """使用当前配置测试 LLM 连接是否可用。"""
+    """使用当前配置测试 LLM 连接是否可用（发送一次短对话，消耗少量 token）。"""
     config = await load_llm_config(db)
 
     try:
@@ -223,6 +258,81 @@ async def chat(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="LLM Chat 调用失败，请检查配置和网络连接。",
         )
+
+
+# ── Chat Streaming 端点 (SSE) ────────────────────────────
+
+
+@router.post(
+    "/chat/stream",
+    summary="流式多轮对话 (SSE)",
+)
+async def chat_stream(
+    req: ChatRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    调用 Chat 模型进行流式对话，通过 Server-Sent Events 逐 token 返回。
+    事件类型:
+      - data: {"delta": "..."} — 增量文本片段
+      - data: {"done": true, "content": "...", "usage": {...}} — 完成信号
+      - data: {"error": "..."} — 错误信号
+    """
+    config = await load_llm_config(db)
+    client = get_async_openai_client(config)
+
+    model = config.get("model_chat", "").strip()
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM 未配置: model_chat 为空。",
+        )
+
+    messages = [{"role": m.role, "content": m.content} for m in req.messages]
+
+    async def event_generator():
+        full_content = ""
+        try:
+            kwargs = {
+                "model": model,
+                "messages": messages,
+                "temperature": req.temperature,
+                "stream": True,
+            }
+            if req.max_tokens is not None:
+                kwargs["max_tokens"] = req.max_tokens
+
+            stream = await client.chat.completions.create(**kwargs)
+
+            async for chunk in stream:
+                # 检查客户端是否断开
+                if await request.is_disconnected():
+                    break
+                if chunk.choices and chunk.choices[0].delta.content:
+                    delta = chunk.choices[0].delta.content
+                    full_content += delta
+                    yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+
+            # 完成信号
+            yield f"data: {json.dumps({'done': True, 'content': full_content, 'model': model}, ensure_ascii=False)}\n\n"
+            logger.info(
+                "Chat Stream 完成: model=%s, length=%d", model, len(full_content)
+            )
+
+        except Exception as e:
+            logger.error("Chat Stream 失败: %s", e)
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ── Embed 端点 ───────────────────────────────────────────

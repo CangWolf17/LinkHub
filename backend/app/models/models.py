@@ -26,9 +26,13 @@ class PortableSoftware(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     executable_path: Mapped[str] = mapped_column(Text, nullable=False)
+    install_dir: Mapped[str | None] = mapped_column(Text, default=None)  # 安装目录
     description: Mapped[str | None] = mapped_column(Text, default=None)
     tags: Mapped[str | None] = mapped_column(Text, default=None)  # JSON 字符串存储
     icon_path: Mapped[str | None] = mapped_column(Text, default=None)
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=None
+    )  # 最近使用时间
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()

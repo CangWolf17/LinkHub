@@ -704,7 +704,7 @@ async function exportConfig() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `linkhub-config-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `linkhub-config-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.json`
     a.click()
     URL.revokeObjectURL(url)
     configIoMsg.value = '配置已导出'
@@ -723,16 +723,38 @@ async function importConfig(event: Event) {
 
   try {
     const text = await file.text()
-    const config = JSON.parse(text)
-    await importSettings(config)
-    configIoMsg.value = '配置已导入，正在重新加载...'
+    let config: Record<string, unknown>
+    try {
+      config = JSON.parse(text)
+    } catch {
+      configIoMsg.value = '导入失败：JSON 格式解析错误'
+      configIoMsgType.value = 'error'
+      return
+    }
+
+    if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+      configIoMsg.value = '导入失败：配置文件应为 JSON 对象'
+      configIoMsgType.value = 'error'
+      return
+    }
+
+    // 兼容旧版: allowed_dirs 可能是字符串数组
+    if (Array.isArray(config.allowed_dirs)) {
+      config.allowed_dirs = (config.allowed_dirs as Array<unknown>).map((item) => {
+        if (typeof item === 'string') return { path: item, type: 'software' }
+        return item
+      })
+    }
+
+    const { data } = await importSettings(config)
+    configIoMsg.value = `${data.message}，正在重新加载...`
     configIoMsgType.value = 'success'
     // 重新加载所有数据
     await Promise.all([loadAllowedDirs(), loadConfig(), loadStats(), loadPortConfig()])
-    configIoMsg.value = '配置导入完成'
-    setTimeout(() => { configIoMsg.value = '' }, 3000)
+    configIoMsg.value = `配置导入完成 (${data.imported_keys.length} 项)`
+    setTimeout(() => { configIoMsg.value = '' }, 5000)
   } catch {
-    configIoMsg.value = '导入失败：文件格式错误'
+    configIoMsg.value = '导入失败：请检查文件内容'
     configIoMsgType.value = 'error'
   } finally {
     input.value = '' // 允许重复选择同一文件

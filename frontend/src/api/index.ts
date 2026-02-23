@@ -9,10 +9,12 @@ export interface Software {
   id: string
   name: string
   executable_path: string
+  install_dir: string | null
   description: string | null
   tags: string | null
   icon_path: string | null
   is_missing?: boolean
+  last_used_at: string | null
   created_at: string
   updated_at: string
 }
@@ -137,8 +139,10 @@ export const updatePortConfig = (port: number) =>
 
 // ── Software (Module B) ─────────────────────────────────
 
-export const getSoftwareList = (params?: { search?: string }) =>
-  http.get<{ items: Software[]; total: number }>('/metadata/software', { params })
+export const getSoftwareList = (params?: { search?: string; limit?: number }) =>
+  http.get<{ items: Software[]; total: number }>('/metadata/software', {
+    params: { limit: 9999, ...params },
+  })
 
 export const getSoftware = (id: string) =>
   http.get<Software>(`/metadata/software/${id}`)
@@ -167,10 +171,17 @@ export const generateSoftwareDescription = (id: string, customPrompt?: string, m
     customPrompt ? { custom_prompt: customPrompt, mode: mode || 'append' } : {}
   )
 
+export const generateSoftwareTags = (id: string) =>
+  http.post<{ success: boolean; tags: string; message: string }>(
+    `/metadata/software/${id}/generate-tags`
+  )
+
 // ── Workspaces (Module B) ────────────────────────────────
 
-export const getWorkspaceList = (params?: { search?: string; status?: string }) =>
-  http.get<{ items: Workspace[]; total: number }>('/metadata/workspaces', { params })
+export const getWorkspaceList = (params?: { search?: string; status?: string; limit?: number }) =>
+  http.get<{ items: Workspace[]; total: number }>('/metadata/workspaces', {
+    params: { limit: 9999, ...params },
+  })
 
 export const getWorkspace = (id: string) =>
   http.get<Workspace>(`/metadata/workspaces/${id}`)
@@ -205,6 +216,12 @@ export const generateWorkspaceDescription = (id: string, customPrompt?: string, 
     customPrompt ? { custom_prompt: customPrompt, mode: mode || 'append' } : {}
   )
 
+export const aiWorkspaceFillForm = (directoryPath: string) =>
+  http.post<{ success: boolean; name: string; description: string; deadline: string | null; model: string; message: string }>(
+    '/metadata/workspaces/ai-fill-form',
+    { directory_path: directoryPath }
+  )
+
 // ── LLM Gateway (Module C) ──────────────────────────────
 
 export const getLlmConfig = () =>
@@ -216,8 +233,93 @@ export const updateLlmConfig = (data: Partial<LlmConfig>) =>
 export const testLlmConnection = () =>
   http.post<{ success: boolean; message: string; model: string; raw_response: unknown }>('/llm/test-connection')
 
+export const llmHealthCheck = () =>
+  http.get<{ success: boolean; message: string; models: string[] }>('/llm/health')
+
 export const llmChat = (messages: Array<{ role: string; content: string }>) =>
   http.post('/llm/chat', { messages })
+
+/**
+ * 流式 LLM Chat — 使用 SSE (Server-Sent Events)。
+ * 自动将增量内容推送到 LLM Monitor。
+ * @returns 完整的响应文本
+ */
+export async function llmChatStream(
+  messages: Array<{ role: string; content: string }>,
+  opts?: {
+    temperature?: number
+    max_tokens?: number
+    onDelta?: (delta: string, accumulated: string) => void
+  },
+): Promise<string> {
+  const { llmMonitor: _monitor } = await import('@/composables/useLlmMonitor')
+  const body = {
+    messages,
+    ...(opts?.temperature !== undefined ? { temperature: opts.temperature } : {}),
+    ...(opts?.max_tokens !== undefined ? { max_tokens: opts.max_tokens } : {}),
+  }
+
+  const entry = _monitor.startStreamRequest({ url: '/llm/chat/stream', body })
+
+  try {
+    const response = await fetch('/api/llm/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      _monitor.endStreamRequest(entry.id, { error: errText })
+      throw new Error(errText)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No readable stream')
+
+    const decoder = new TextDecoder()
+    let accumulated = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const text = decoder.decode(value, { stream: true })
+      // 解析 SSE data: 行
+      const lines = text.split('\n')
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const payload = JSON.parse(line.slice(6))
+          if (payload.delta) {
+            accumulated += payload.delta
+            _monitor.appendStreamDelta(entry.id, payload.delta)
+            opts?.onDelta?.(payload.delta, accumulated)
+          }
+          if (payload.done) {
+            _monitor.endStreamRequest(entry.id, { content: payload.content || accumulated })
+          }
+          if (payload.error) {
+            _monitor.endStreamRequest(entry.id, { error: payload.error })
+            throw new Error(payload.error)
+          }
+        } catch (e) {
+          // ignore JSON parse errors for incomplete lines
+          if (e instanceof Error && e.message !== 'Unexpected end of JSON input') {
+            if (e.message.startsWith('{')) continue // partial JSON
+            // re-throw actual errors (like the LLM error above)
+            if (line.includes('"error"')) throw e
+          }
+        }
+      }
+    }
+
+    return accumulated
+  } catch (e) {
+    _monitor.endStreamRequest(entry.id, { error: String(e) })
+    throw e
+  }
+}
 
 // ── Installer (Module D) ────────────────────────────────
 

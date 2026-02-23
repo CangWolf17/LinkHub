@@ -28,7 +28,7 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.config import (
     APP_HOST,
@@ -151,6 +151,27 @@ async def _migrate_plaintext_api_key():
                 logger.error("llm_api_key 迁移加密失败: %s", e)
 
 
+async def _migrate_db_schema():
+    """
+    启动时自动迁移数据库 Schema：为旧版数据库补充新增列。
+    使用 ALTER TABLE ADD COLUMN，SQLite 中若列已存在会忽略错误。
+    """
+    migrations = [
+        ("portable_software", "install_dir", "TEXT"),
+        ("portable_software", "last_used_at", "DATETIME"),
+    ]
+    async with engine.begin() as conn:
+        for table, column, col_type in migrations:
+            try:
+                await conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                )
+                logger.info("数据库迁移: 已添加 %s.%s 列", table, column)
+            except Exception:
+                # 列已存在，忽略
+                pass
+
+
 # ── 应用生命周期 ──────────────────────────────────────────
 
 
@@ -163,6 +184,9 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("数据库表已就绪")
+
+    # 自动迁移: 为旧版数据库补充新增列
+    await _migrate_db_schema()
 
     # 插入默认配置
     await _seed_default_settings()
@@ -208,7 +232,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LinkHub - Local Smart Dashboard",
     description="本地智能工作区与软件控制台",
-    version="1.1.0",
+    version="1.2.0",
     lifespan=lifespan,
 )
 

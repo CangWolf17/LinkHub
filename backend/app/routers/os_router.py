@@ -12,6 +12,7 @@ import logging
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -26,7 +27,7 @@ from app.core.config import (
     parse_allowed_dirs,
 )
 from app.core.database import get_db
-from app.models.models import SystemSetting
+from app.models.models import PortableSoftware, SystemSetting
 from app.schemas.os_schemas import OSActionResponse, OSTargetRequest
 
 logger = logging.getLogger(__name__)
@@ -154,6 +155,21 @@ async def launch_executable(
         )
 
         logger.info("已拉起程序: %s", resolved)
+
+        # 更新软件的最近使用时间
+        try:
+            result = await db.execute(
+                select(PortableSoftware).where(
+                    PortableSoftware.executable_path == str(resolved)
+                )
+            )
+            sw = result.scalar_one_or_none()
+            if sw:
+                sw.last_used_at = datetime.now(timezone.utc)
+                await db.commit()
+        except Exception as e:
+            logger.debug("更新 last_used_at 失败（非阻塞）: %s", e)
+
         return OSActionResponse(
             success=True,
             message="程序已成功启动",
@@ -202,10 +218,10 @@ async def open_directory(
     # 使用 explorer 打开目录 (Windows)
     try:
         if sys.platform == "win32":
-            # explorer 不需要 DETACHED_PROCESS，它本身就是独立进程
+            # 使用 start explorer 避免窗口被后台进程遮挡
             subprocess.Popen(
-                ["explorer", str(resolved)],
-                creationflags=subprocess.DETACHED_PROCESS,
+                ["cmd", "/c", "start", "explorer", str(resolved)],
+                creationflags=subprocess.CREATE_NO_WINDOW,
                 close_fds=True,
             )
         else:

@@ -82,6 +82,12 @@ backend/uploads/
 tools/
 *.zip
 
+# Ruff linter cache
+.ruff_cache/
+
+# Windows NUL device artifact
+nul
+
 # Temp scripts
 _check_*.py
 
