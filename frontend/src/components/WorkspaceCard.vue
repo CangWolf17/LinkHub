@@ -16,7 +16,7 @@
             class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
             @change="$emit('toggle-select', workspace.id)"
           />
-          <span class="text-lg flex-shrink-0">{{ statusIcon }}</span>
+          <component :is="statusIconComponent" :size="18" class="flex-shrink-0" :class="statusIconClass" />
           <h3
             class="text-sm font-semibold truncate"
             :class="workspace.is_missing ? 'text-gray-400 line-through' : 'text-gray-900'"
@@ -34,27 +34,21 @@
             title="打开目录"
             @click="$emit('openDir', workspace.directory_path)"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
-            </svg>
+            <FolderOpen :size="16" />
           </button>
           <button
             class="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
             title="编辑"
             @click="$emit('edit', workspace)"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-            </svg>
+            <Pencil :size="16" />
           </button>
           <button
             class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
             title="删除"
             @click="$emit('delete', workspace.id)"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
+            <Trash2 :size="16" />
           </button>
         </div>
       </div>
@@ -103,13 +97,11 @@
           :title="treeExpanded ? '收起目录树' : '展开目录树'"
           @click="treeExpanded = !treeExpanded"
         >
-          <svg
-            class="w-3.5 h-3.5 transition-transform duration-200"
+          <ChevronDown
+            :size="14"
+            class="transition-transform duration-200"
             :class="treeExpanded ? 'rotate-180' : ''"
-            fill="none" stroke="currentColor" viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-          </svg>
+          />
         </button>
       </div>
     </div>
@@ -125,6 +117,7 @@
 import { ref, computed } from 'vue'
 import type { Workspace } from '@/api'
 import DirectoryTree from '@/components/DirectoryTree.vue'
+import { AlertTriangle, Hourglass, CircleDot, CircleCheckBig, Archive, FolderOpen, Pencil, Trash2, ChevronDown } from 'lucide-vue-next'
 
 const props = defineProps<{
   workspace: Workspace
@@ -141,14 +134,25 @@ defineEmits<{
 
 const treeExpanded = ref(false)
 
-const statusIcon = computed(() => {
-  if (props.workspace.is_missing) return '⚠️'
+const statusIconComponent = computed(() => {
+  if (props.workspace.is_missing) return AlertTriangle
   switch (props.workspace.status) {
-    case 'not_started': return '⏳'
-    case 'active': return '🟢'
-    case 'completed': return '✅'
-    case 'archived': return '📁'
-    default: return '📂'
+    case 'not_started': return Hourglass
+    case 'active': return CircleDot
+    case 'completed': return CircleCheckBig
+    case 'archived': return Archive
+    default: return FolderOpen
+  }
+})
+
+const statusIconClass = computed(() => {
+  if (props.workspace.is_missing) return 'text-amber-500'
+  switch (props.workspace.status) {
+    case 'not_started': return 'text-yellow-500'
+    case 'active': return 'text-green-500'
+    case 'completed': return 'text-blue-500'
+    case 'archived': return 'text-gray-400'
+    default: return 'text-gray-400'
   }
 })
 

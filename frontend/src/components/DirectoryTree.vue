@@ -2,10 +2,7 @@
   <div class="text-xs font-mono">
     <!-- 加载状态 -->
     <div v-if="loading" class="flex items-center gap-2 py-2 text-gray-400">
-      <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-      </svg>
+      <Loader2 :size="14" class="animate-spin" />
       <span>加载中...</span>
     </div>
 
@@ -32,6 +29,7 @@ import { ref, onMounted } from 'vue'
 import { listDir } from '@/api'
 import type { ListDirItem } from '@/api'
 import DirectoryTreeNode from '@/components/DirectoryTreeNode.vue'
+import { Loader2 } from 'lucide-vue-next'
 
 const props = defineProps<{
   rootPath: string

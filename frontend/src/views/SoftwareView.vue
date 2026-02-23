@@ -79,11 +79,7 @@
           title="清理死链"
           @click="cleanupDead"
         >
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" />
-            <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          </svg>
+          <Unlink :size="20" />
         </button>
         <!-- 导入按钮 -->
         <button
@@ -101,9 +97,7 @@
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-base font-semibold text-gray-900">导入软件</h3>
           <button class="text-gray-400 hover:text-gray-600" @click="showImportModal = false">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X :size="20" />
           </button>
         </div>
 
@@ -125,7 +119,7 @@
             <div class="text-xs text-gray-500">{{ uploadMessage }}</div>
           </div>
           <div v-else>
-            <div class="text-2xl mb-1">📦</div>
+            <Package :size="28" class="text-blue-500 mb-1 mx-auto" />
             <p class="text-sm text-gray-600">
               拖入压缩包或 <span class="text-blue-600 underline">点击选择</span>
             </p>
@@ -160,7 +154,7 @@
           :title="sw.name"
           @click="sw.executable_path ? handleLaunch(sw.executable_path) : undefined"
         >
-          <span class="text-2xl">📦</span>
+          <Package :size="24" class="text-blue-500" />
           <span class="text-[11px] font-medium text-gray-700 text-center px-2 truncate w-full group-hover:text-blue-600">{{ sw.name }}</span>
         </div>
       </div>
@@ -197,13 +191,11 @@
           class="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-lg transition-colors text-sm font-medium border border-gray-200"
           @click="showMissing = !showMissing"
         >
-          <svg
-            class="w-4 h-4 transition-transform duration-200"
+          <ChevronDown
+            :size="16"
+            class="transition-transform duration-200"
             :class="showMissing ? 'rotate-180' : ''"
-            fill="none" stroke="currentColor" viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-          </svg>
+          />
           路径失效 ({{ missingItems.length }})
         </button>
         <transition
@@ -240,6 +232,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getSoftwareList, uploadInstall, deleteSoftware, launchApp, openDir, cleanupDeadSoftware, generateSoftwareDescription, batchDeleteSoftware, scanAndImportSoftware, generateSoftwareTags, getLlmConfig } from '@/api'
 import type { Software } from '@/api'
 import SoftwareCard from '@/components/SoftwareCard.vue'
+import { Unlink, X, ChevronDown, Package } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()

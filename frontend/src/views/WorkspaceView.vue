@@ -97,11 +97,7 @@
           title="清理死链"
           @click="cleanupDead"
         >
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" />
-            <line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          </svg>
+          <Unlink :size="20" />
         </button>
       </div>
     </div>
@@ -142,13 +138,11 @@
             class="flex items-center gap-2 mb-3 text-sm font-semibold text-gray-500 hover:text-gray-700 transition-colors"
             @click="toggleGroup(group.label)"
           >
-            <svg
-              class="w-3.5 h-3.5 transition-transform duration-200"
+            <ChevronDown
+              :size="14"
+              class="transition-transform duration-200"
               :class="collapsedGroups.has(group.label) ? '-rotate-90' : ''"
-              fill="none" stroke="currentColor" viewBox="0 0 24 24"
-            >
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-            </svg>
+            />
             {{ group.label }} ({{ group.items.length }})
           </button>
           <div v-if="!collapsedGroups.has(group.label)" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -173,13 +167,11 @@
           class="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-lg transition-colors text-sm font-medium border border-gray-200"
           @click="showArchived = !showArchived"
         >
-          <svg
-            class="w-4 h-4 transition-transform duration-200"
+          <ChevronDown
+            :size="16"
+            class="transition-transform duration-200"
             :class="showArchived ? 'rotate-180' : ''"
-            fill="none" stroke="currentColor" viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-          </svg>
+          />
           已归档 ({{ archivedItems.length }})
         </button>
         <transition
@@ -224,6 +216,7 @@ import { getWorkspaceList, deleteWorkspace, openDir, cleanupDeadWorkspaces, batc
 import type { Workspace } from '@/api'
 import WorkspaceCard from '@/components/WorkspaceCard.vue'
 import WorkspaceDialog from '@/components/WorkspaceDialog.vue'
+import { Unlink, ChevronDown } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()

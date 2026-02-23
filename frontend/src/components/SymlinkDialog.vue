@@ -12,9 +12,7 @@
             class="flex items-center gap-2 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg font-mono text-gray-700"
             :title="sourcePath"
           >
-            <svg class="w-4 h-4 text-yellow-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-            </svg>
+            <FolderOpen :size="16" class="text-yellow-500 flex-shrink-0" />
             <span class="truncate">{{ sourcePath }}</span>
           </div>
         </div>
@@ -22,9 +20,7 @@
         <!-- 动画连接线 -->
         <div class="flex justify-center py-1">
           <div class="flex flex-col items-center gap-1">
-            <svg class="w-5 h-5 text-purple-400 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
-            </svg>
+            <ArrowDown :size="20" class="text-purple-400 animate-bounce" />
             <span class="text-[10px] text-purple-400 font-medium">JUNCTION</span>
           </div>
         </div>
@@ -45,9 +41,7 @@
               title="浏览..."
               @click="showBrowser = true"
             >
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-              </svg>
+              <FolderOpen :size="16" />
             </button>
           </div>
         </div>
@@ -114,6 +108,7 @@
 import { ref, computed } from 'vue'
 import { createSymlink } from '@/api'
 import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
+import { FolderOpen, ArrowDown } from 'lucide-vue-next'
 
 const props = defineProps<{
   sourcePath: string

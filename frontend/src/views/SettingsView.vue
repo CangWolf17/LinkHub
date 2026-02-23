@@ -51,9 +51,7 @@
               @click="openFolderPicker(i)"
               title="浏览..."
             >
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-              </svg>
+              <FolderOpen :size="16" />
             </button>
             <button
               type="button"
@@ -61,9 +59,7 @@
               @click="removeAllowedDir(i)"
               title="移除"
             >
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <X :size="16" />
             </button>
           </div>
         </div>
@@ -73,9 +69,7 @@
           class="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium mb-4"
           @click="addAllowedDir"
         >
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-          </svg>
+          <Plus :size="16" />
           添加目录
         </button>
 
@@ -126,13 +120,8 @@
               class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
               @click="showKey = !showKey"
             >
-              <svg v-if="!showKey" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
-              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.59 6.59m7.532 7.532l3.29 3.29M3 3l18 18" />
-              </svg>
+              <Eye v-if="!showKey" :size="16" />
+              <EyeOff v-else :size="16" />
             </button>
           </div>
           <p v-if="currentConfig?.has_api_key" class="mt-1 text-xs text-green-600">
@@ -473,6 +462,7 @@ import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse, Di
 import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
 import ApiUrlCombobox from '@/components/ApiUrlCombobox.vue'
 import { LLM_API_PRESETS } from '@/constants/llmPresets'
+import { FolderOpen, X, Plus, Eye, EyeOff } from 'lucide-vue-next'
 
 // ── 标签页 ───────────────────────────────────────────────
 const tabs = [

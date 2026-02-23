@@ -9,27 +9,25 @@
     >
       <!-- 展开/折叠箭头 (仅目录) -->
       <span v-if="item.is_dir" class="w-3.5 h-3.5 flex items-center justify-center flex-shrink-0">
-        <svg
-          class="w-3 h-3 text-gray-400 transition-transform duration-150"
+        <ChevronRight
+          :size="12"
+          class="text-gray-400 transition-transform duration-150"
           :class="expanded ? 'rotate-90' : ''"
-          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-        </svg>
+        />
       </span>
       <!-- 文件占位 -->
       <span v-else class="w-3.5 h-3.5 flex-shrink-0" />
 
       <!-- 图标 -->
-      <span class="flex-shrink-0 text-[11px]">
+      <span class="flex-shrink-0">
         <template v-if="item.is_dir">
-          <span v-if="item.is_symlink" class="text-purple-500" title="符号链接目录">&#128279;&#128193;</span>
-          <span v-else-if="expanded" class="text-yellow-500">&#128194;</span>
-          <span v-else class="text-yellow-600">&#128193;</span>
+          <span v-if="item.is_symlink" class="inline-flex items-center gap-0.5 text-purple-500" title="符号链接目录"><Link :size="12" /><Folder :size="12" /></span>
+          <FolderOpen v-else-if="expanded" :size="12" class="text-yellow-500" />
+          <Folder v-else :size="12" class="text-yellow-600" />
         </template>
         <template v-else>
-          <span v-if="item.is_symlink" class="text-purple-500" title="符号链接文件">&#128279;</span>
-          <span v-else class="text-gray-400">&#128196;</span>
+          <span v-if="item.is_symlink" class="text-purple-500" title="符号链接文件"><Link :size="12" /></span>
+          <File v-else :size="12" class="text-gray-400" />
         </template>
       </span>
 
@@ -69,18 +67,14 @@
           class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-purple-50 hover:text-purple-700 transition-colors text-left"
           @click="handleCreateSymlink"
         >
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-          </svg>
+          <Link :size="14" />
           创建符号链接
         </button>
         <button
           class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors text-left"
           @click="handleCopyPath"
         >
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-          </svg>
+          <Clipboard :size="14" />
           复制路径
         </button>
       </div>
@@ -97,10 +91,7 @@
     <!-- 子节点 (递归) -->
     <div v-if="item.is_dir && expanded">
       <div v-if="childLoading" class="flex items-center gap-1.5 py-0.5 text-gray-400" :style="{ paddingLeft: `${(depth + 1) * 16 + 4}px` }">
-        <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-        </svg>
+        <Loader2 :size="12" class="animate-spin" />
         <span class="text-[11px]">加载中...</span>
       </div>
       <div v-else-if="childError" class="text-red-400 text-[11px]" :style="{ paddingLeft: `${(depth + 1) * 16 + 4}px` }">
@@ -130,6 +121,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { listDir } from '@/api'
 import type { ListDirItem } from '@/api'
 import SymlinkDialog from '@/components/SymlinkDialog.vue'
+import { ChevronRight, Folder, FolderOpen, File, Link, Loader2, Clipboard } from 'lucide-vue-next'
 
 const props = defineProps<{
   item: ListDirItem

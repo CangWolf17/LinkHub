@@ -15,7 +15,7 @@
           :title="sw.name + (sw.description ? '\n' + sw.description : '')"
           @click="handleLaunch(sw)"
         >
-          <span class="text-2xl">📦</span>
+          <Package :size="24" class="text-blue-500" />
           <span class="text-[11px] font-medium text-gray-700 text-center px-2 truncate w-full group-hover:text-blue-600">{{ sw.name }}</span>
         </div>
       </div>
@@ -82,6 +82,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getSoftwareList, getWorkspaceList, launchApp } from '@/api'
 import type { Software, Workspace } from '@/api'
+import { Package } from 'lucide-vue-next'
 
 const router = useRouter()
 

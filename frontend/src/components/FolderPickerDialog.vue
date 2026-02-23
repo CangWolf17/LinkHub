@@ -12,9 +12,7 @@
             class="p-1 text-gray-400 hover:text-gray-600 transition-colors"
             @click="$emit('cancel')"
           >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X :size="16" />
           </button>
         </div>
 
@@ -57,9 +55,7 @@
               class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               @click="navigateTo(parentPath || '')"
             >
-              <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 17l-5-5m0 0l5-5m-5 5h12" />
-              </svg>
+              <ArrowLeft :size="16" class="text-gray-400" />
               <span class="text-gray-500">返回上级</span>
             </button>
             <!-- 子目录列表 -->
@@ -73,9 +69,7 @@
               @click="selectItem(item)"
               @dblclick="navigateTo(item.path)"
             >
-              <svg class="w-4 h-4 text-yellow-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-              </svg>
+              <Folder :size="16" class="text-yellow-500 shrink-0" />
               <span class="truncate">{{ item.name }}</span>
             </button>
           </div>
@@ -118,6 +112,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { browseDir } from '@/api'
 import type { DirItem } from '@/api'
+import { X, ArrowLeft, Folder } from 'lucide-vue-next'
 
 const props = defineProps<{
   initialPath?: string

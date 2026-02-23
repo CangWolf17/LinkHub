@@ -14,9 +14,7 @@
         class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
         @click="toggleDropdown"
       >
-        <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': showDropdown }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-        </svg>
+        <ChevronDown :size="16" class="transition-transform" :class="{ 'rotate-180': showDropdown }" />
       </button>
     </div>
 
@@ -37,9 +35,7 @@
           <div class="font-medium text-gray-800 truncate">{{ opt.label }}</div>
           <div class="text-xs text-gray-400 truncate">{{ opt.value }}</div>
         </div>
-        <svg v-if="opt.value === modelValue" class="w-4 h-4 shrink-0 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-        </svg>
+        <Check v-if="opt.value === modelValue" :size="16" class="shrink-0 text-blue-500" />
       </button>
     </div>
   </div>
@@ -47,6 +43,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ChevronDown, Check } from 'lucide-vue-next'
 
 export interface ComboOption {
   label: string

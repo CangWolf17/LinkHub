@@ -26,9 +26,7 @@
             class="text-gray-400 hover:text-gray-200 p-1 rounded hover:bg-gray-800 transition-colors"
             @click="monitor.toggle()"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X :size="16" />
           </button>
         </div>
       </div>
@@ -106,6 +104,7 @@
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { useLlmMonitor } from '@/composables/useLlmMonitor'
+import { X } from 'lucide-vue-next'
 
 const monitor = useLlmMonitor()
 const monitorEl = ref<HTMLElement | null>(null)

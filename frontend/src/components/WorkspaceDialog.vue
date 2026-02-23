@@ -12,9 +12,7 @@
           :title="aiFilling ? 'AI 填充中...' : 'AI 根据目录路径自动填充表单'"
           @click="handleAiFill"
         >
-          <svg class="w-3.5 h-3.5" :class="aiFilling ? 'animate-pulse' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
-          </svg>
+          <Sparkles :size="14" :class="aiFilling ? 'animate-pulse' : ''" />
           {{ aiFilling ? 'AI 填充中...' : 'AI 填充' }}
         </button>
       </div>
@@ -50,9 +48,7 @@
               @click="showFolderPicker = true"
               title="浏览..."
             >
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-              </svg>
+              <FolderOpen :size="16" />
             </button>
           </div>
         </div>
@@ -68,9 +64,7 @@
               :title="generatingDesc ? '生成中...' : 'AI 生成描述'"
               @click="handleGenerateDescription"
             >
-              <svg class="w-3.5 h-3.5" :class="generatingDesc ? 'animate-pulse' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
-              </svg>
+              <Sparkles :size="14" :class="generatingDesc ? 'animate-pulse' : ''" />
               {{ generatingDesc ? '生成中...' : 'AI 生成' }}
             </button>
           </div>
@@ -109,9 +103,7 @@
                     title="清除日期"
                     @click="deadlineDate = null"
                   >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <X :size="16" />
                   </button>
                 </div>
               </template>
@@ -179,6 +171,7 @@ import type { Workspace, DirEntry } from '@/api'
 import { DatePicker } from 'v-calendar'
 import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
 import AiPromptDialog from '@/components/AiPromptDialog.vue'
+import { Sparkles, FolderOpen, X } from 'lucide-vue-next'
 
 const props = defineProps<{
   workspace: Workspace | null

@@ -18,8 +18,10 @@
               class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
               @change="$emit('toggle-select', software.id)"
             />
-            <span v-if="!iconData" class="text-lg flex-shrink-0">
-              {{ software.is_missing ? '⚠️' : isResourceOnly ? '📁' : '📦' }}
+            <span v-if="!iconData" class="flex-shrink-0">
+              <AlertTriangle v-if="software.is_missing" :size="20" class="text-amber-500" />
+              <Folder v-else-if="isResourceOnly" :size="20" class="text-yellow-600" />
+              <Package v-else :size="20" class="text-blue-500" />
             </span>
             <img
               v-else
@@ -45,10 +47,7 @@
               title="启动"
               @click="$emit('launch', software.executable_path)"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+              <Play :size="16" />
             </button>
             <!-- 资源类：打开目录按钮（突出显示） -->
             <button
@@ -57,18 +56,14 @@
               title="打开目录"
               @click="$emit('open-dir', folderPath)"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
-              </svg>
+              <FolderOpen :size="16" />
             </button>
             <button
               class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
               title="删除"
               @click="$emit('delete', software.id)"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
+              <Trash2 :size="16" />
             </button>
           </div>
         </div>
@@ -119,18 +114,14 @@
                 :disabled="generating"
                 @click="handleGenerate"
               >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
-                </svg>
+                <Sparkles :size="14" />
               </button>
               <button
                 class="p-1 text-gray-300 hover:text-blue-500 hover:bg-blue-50 rounded transition-colors"
                 title="编辑描述"
                 @click="startEdit"
               >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-                </svg>
+                <Pencil :size="14" />
               </button>
               <button
                 v-if="software.executable_path || software.install_dir"
@@ -138,9 +129,7 @@
                 title="打开所在文件夹"
                 @click="$emit('open-dir', folderPath)"
               >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
-                </svg>
+                <FolderOpen :size="14" />
               </button>
             </div>
           </div>
@@ -194,6 +183,7 @@ import { ref, computed, nextTick, onMounted } from 'vue'
 import type { Software } from '@/api'
 import { generateSoftwareDescription, updateSoftware, extractIcon } from '@/api'
 import AiPromptDialog from '@/components/AiPromptDialog.vue'
+import { AlertTriangle, Folder, Package, Play, FolderOpen, Trash2, Sparkles, Pencil } from 'lucide-vue-next'
 
 const props = defineProps<{
   software: Software

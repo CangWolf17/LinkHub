@@ -21,7 +21,7 @@
                 : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
             ]"
           >
-            <span class="text-base">{{ item.icon }}</span>
+            <component :is="item.icon" :size="18" class="flex-shrink-0" />
             <span>{{ item.label }}</span>
           </router-link>
 
@@ -36,16 +36,14 @@
               ]"
               @click="handleExpandableClick(item)"
             >
-              <span class="text-base">{{ item.icon }}</span>
+              <component :is="item.icon" :size="18" class="flex-shrink-0" />
               <span class="flex-1 text-left">{{ item.label }}</span>
-              <svg
+              <ChevronDown
                 v-if="item.children.length > 0"
-                class="w-3.5 h-3.5 transition-transform duration-200 text-gray-400"
+                :size="14"
+                class="transition-transform duration-200 text-gray-400"
                 :class="expandedNav.has(item.path) ? '' : '-rotate-90'"
-                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-              </svg>
+              />
             </button>
             <!-- 子菜单 -->
             <div v-if="expandedNav.has(item.path) && item.children.length > 0" class="ml-6 mt-0.5 space-y-0.5">
@@ -147,7 +145,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getHealth, getInitStatus, getAllowedDirs, updateAllowedDirs, llmHealthCheck } from '@/api'
 import type { DirEntry } from '@/api'
@@ -155,6 +153,7 @@ import { useLlmMonitor } from '@/composables/useLlmMonitor'
 import SearchBar from '@/components/SearchBar.vue'
 import LlmDebugMonitor from '@/components/LlmDebugMonitor.vue'
 import SetupWizard from '@/components/SetupWizard.vue'
+import { Home, Package, FolderOpen, ClipboardList, Settings, ChevronDown } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -170,16 +169,16 @@ const renameInput = ref('')
 interface NavItem {
   path: string
   label: string
-  icon: string
+  icon: Component
   children?: Array<{ path: string; label: string; dotColor: string }>
 }
 
 const navItems = computed<NavItem[]>(() => [
-  { path: '/', label: '首页', icon: '🏠' },
-  { path: '/software', label: '软件舱', icon: '📦' },
-  { path: '/workspaces', label: '工作区', icon: '📂', children: workspaceDirEntries.value },
-  { path: '/logs', label: '日志', icon: '📋' },
-  { path: '/settings', label: '设置', icon: '⚙️' },
+  { path: '/', label: '首页', icon: Home },
+  { path: '/software', label: '软件舱', icon: Package },
+  { path: '/workspaces', label: '工作区', icon: FolderOpen, children: workspaceDirEntries.value },
+  { path: '/logs', label: '日志', icon: ClipboardList },
+  { path: '/settings', label: '设置', icon: Settings },
 ])
 
 const expandedNav = ref<Set<string>>(new Set(['/workspaces']))
