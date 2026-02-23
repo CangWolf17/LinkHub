@@ -30,7 +30,7 @@ from app.core.config import (
     serialize_allowed_dirs,
 )
 from app.core.database import get_db
-from app.models.models import SystemSetting
+from app.models.models import PortableSoftware, SystemSetting, Workspace
 
 
 class UpdateAllowedDirsRequest(BaseModel):
@@ -195,6 +195,7 @@ _SENSITIVE_KEYS = {"llm_api_key"}
 async def export_config(db: AsyncSession = Depends(get_db)):
     """
     导出 system_settings 表中的所有配置为 JSON。
+    同时导出软件和工作区的元数据（描述、标签等），便于迁移。
     API Key 等敏感字段会被排除。
     """
     result = await db.execute(select(SystemSetting))
@@ -207,7 +208,45 @@ async def export_config(db: AsyncSession = Depends(get_db)):
             settings[row.key] = parse_allowed_dirs(row.value)
         else:
             settings[row.key] = row.value
-    settings["_export_version"] = "2"
+
+    # 导出软件元数据
+    sw_result = await db.execute(select(PortableSoftware))
+    software_meta = []
+    for sw in sw_result.scalars().all():
+        entry: dict = {
+            "name": sw.name,
+            "executable_path": sw.executable_path,
+        }
+        if sw.install_dir:
+            entry["install_dir"] = sw.install_dir
+        if sw.description:
+            entry["description"] = sw.description
+        if sw.tags:
+            entry["tags"] = sw.tags
+        software_meta.append(entry)
+
+    # 导出工作区元数据
+    ws_result = await db.execute(select(Workspace))
+    workspace_meta = []
+    for ws in ws_result.scalars().all():
+        entry = {
+            "name": ws.name,
+            "directory_path": ws.directory_path,
+        }
+        if ws.description:
+            entry["description"] = ws.description
+        if ws.status and ws.status != "active":
+            entry["status"] = ws.status
+        if ws.deadline:
+            entry["deadline"] = ws.deadline.isoformat()
+        workspace_meta.append(entry)
+
+    if software_meta:
+        settings["_software_metadata"] = software_meta
+    if workspace_meta:
+        settings["_workspace_metadata"] = workspace_meta
+
+    settings["_export_version"] = "3"
     settings["_export_source"] = "LinkHub"
     return settings
 
@@ -230,9 +269,90 @@ async def import_config(
       - 未知字段: 静默跳过（不报错）
     """
     # 过滤掉元数据字段和敏感字段
-    skip_keys = _SENSITIVE_KEYS | {"_export_version", "_export_source"}
+    skip_keys = _SENSITIVE_KEYS | {
+        "_export_version",
+        "_export_source",
+        "_software_metadata",
+        "_workspace_metadata",
+    }
     imported_keys = []
     skipped_keys = []
+
+    # ── 处理软件元数据 ──
+    sw_meta = config.get("_software_metadata")
+    sw_updated = 0
+    if isinstance(sw_meta, list):
+        for item in sw_meta:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            exe_path = str(item.get("executable_path", "")).strip()
+            if not name or not exe_path:
+                continue
+            # 按 name + executable_path 精确匹配
+            sw_result = await db.execute(
+                select(PortableSoftware).where(
+                    PortableSoftware.name == name,
+                    PortableSoftware.executable_path == exe_path,
+                )
+            )
+            sw = sw_result.scalar_one_or_none()
+            if sw is None:
+                continue
+            changed = False
+            if item.get("description") and not sw.description:
+                sw.description = item["description"]
+                changed = True
+            if item.get("tags") and not sw.tags:
+                sw.tags = item["tags"]
+                changed = True
+            if item.get("install_dir") and not sw.install_dir:
+                sw.install_dir = item["install_dir"]
+                changed = True
+            if changed:
+                sw_updated += 1
+        if sw_updated:
+            imported_keys.append(f"_software_metadata({sw_updated})")
+
+    # ── 处理工作区元数据 ──
+    ws_meta = config.get("_workspace_metadata")
+    ws_updated = 0
+    if isinstance(ws_meta, list):
+        for item in ws_meta:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            dir_path = str(item.get("directory_path", "")).strip()
+            if not name or not dir_path:
+                continue
+            ws_result = await db.execute(
+                select(Workspace).where(
+                    Workspace.name == name,
+                    Workspace.directory_path == dir_path,
+                )
+            )
+            ws = ws_result.scalar_one_or_none()
+            if ws is None:
+                continue
+            changed = False
+            if item.get("description") and not ws.description:
+                ws.description = item["description"]
+                changed = True
+            if item.get("status") and ws.status == "active":
+                ws.status = item["status"]
+                changed = True
+            if item.get("deadline") and not ws.deadline:
+                from datetime import datetime as _dt
+
+                try:
+                    ws.deadline = _dt.fromisoformat(item["deadline"])
+                    changed = True
+                except (ValueError, TypeError):
+                    pass
+            if changed:
+                ws_updated += 1
+        if ws_updated:
+            imported_keys.append(f"_workspace_metadata({ws_updated})")
 
     for key, value in config.items():
         if key in skip_keys:

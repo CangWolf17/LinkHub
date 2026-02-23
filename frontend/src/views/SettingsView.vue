@@ -392,7 +392,7 @@
       <!-- 配置导入导出 -->
       <h2 class="text-lg font-bold text-gray-900 mb-2">配置管理</h2>
       <p class="text-sm text-gray-500 mb-4">
-        导出或导入 LinkHub 配置文件。导出不包含 API Key。
+        导出或导入 LinkHub 配置文件。导出包含系统设置、软件描述/标签和工作区元数据，不包含 API Key。
       </p>
       <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
         <div class="flex items-center gap-3">
