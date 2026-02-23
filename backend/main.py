@@ -33,6 +33,7 @@ from sqlalchemy import select, text
 from app.core.config import (
     APP_HOST,
     APP_PORT,
+    APP_VERSION,
     DEFAULT_ALLOWED_DIRS,
     FRONTEND_DIST_DIR,
     IS_FROZEN,
@@ -232,7 +233,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LinkHub - Local Smart Dashboard",
     description="本地智能工作区与软件控制台",
-    version="1.3.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 

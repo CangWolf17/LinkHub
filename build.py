@@ -27,6 +27,20 @@ DIST_DIR = ROOT / "dist"
 
 PYTHON = sys.executable  # 使用当前 Python 解释器
 
+
+def _read_version() -> str:
+    """从 backend/app/core/config.py 中读取 APP_VERSION。"""
+    config_file = ROOT / "backend" / "app" / "core" / "config.py"
+    import re
+
+    match = re.search(
+        r'APP_VERSION\s*=\s*"([^"]+)"', config_file.read_text(encoding="utf-8")
+    )
+    if match:
+        return match.group(1)
+    return "0.0.0"
+
+
 # UPX 路径（项目内置）
 UPX_DIR = ROOT / "tools" / "upx-5.0.1-win64"
 
@@ -235,7 +249,7 @@ def run_pyinstaller(variant: str):
     return exe
 
 
-def create_zip(variant: str):
+def create_zip(variant: str, version: str):
     """将 onedir 输出打包为 zip 文件。"""
     name = "LinkHub"
     folder = DIST_DIR / name
@@ -243,7 +257,7 @@ def create_zip(variant: str):
         print(f"错误: 文件夹不存在 {folder}")
         return None
 
-    zip_name = f"LinkHub-v1.2.0-full.zip"
+    zip_name = f"LinkHub-v{version}-full.zip"
     zip_path = DIST_DIR / zip_name
     print(f"\n=== 创建 ZIP: {zip_name} ===")
 
@@ -275,7 +289,13 @@ def main():
     parser.add_argument(
         "--clean", action="store_true", help="清理整个 dist 目录后再构建"
     )
+    parser.add_argument(
+        "--version", type=str, default=None, help="指定版本号（默认从 config.py 读取）"
+    )
     args = parser.parse_args()
+
+    version = args.version or _read_version()
+    print(f"构建版本: v{version}")
 
     # 默认行为：无参数等同于 --lite
     if not args.lite and not args.full and not args.all:
@@ -297,10 +317,10 @@ def main():
     if args.all:
         run_pyinstaller("lite")
         run_pyinstaller("full")
-        create_zip("full")
+        create_zip("full", version)
     elif args.full:
         run_pyinstaller("full")
-        create_zip("full")
+        create_zip("full", version)
     elif args.lite:
         run_pyinstaller("lite")
 
