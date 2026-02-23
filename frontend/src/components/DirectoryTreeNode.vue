@@ -5,6 +5,7 @@
       class="flex items-center gap-1.5 py-0.5 px-1 rounded hover:bg-gray-50 cursor-default select-none group"
       :style="{ paddingLeft: `${depth * 16 + 4}px` }"
       @click="toggle"
+      @contextmenu.prevent="onContextMenu"
     >
       <!-- 展开/折叠箭头 (仅目录) -->
       <span v-if="item.is_dir" class="w-3.5 h-3.5 flex items-center justify-center flex-shrink-0">
@@ -55,6 +56,44 @@
       </span>
     </div>
 
+    <!-- 右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="ctxMenu.show"
+        class="fixed z-[100] bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[160px]"
+        :style="{ left: `${ctxMenu.x}px`, top: `${ctxMenu.y}px` }"
+        @click.stop
+      >
+        <button
+          v-if="item.is_dir && !item.is_symlink"
+          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-purple-50 hover:text-purple-700 transition-colors text-left"
+          @click="handleCreateSymlink"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+          </svg>
+          创建符号链接
+        </button>
+        <button
+          class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors text-left"
+          @click="handleCopyPath"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+          </svg>
+          复制路径
+        </button>
+      </div>
+    </Teleport>
+
+    <!-- 符号链接弹窗 -->
+    <SymlinkDialog
+      v-if="showSymlinkDialog"
+      :source-path="item.path"
+      @close="showSymlinkDialog = false"
+      @created="onSymlinkCreated"
+    />
+
     <!-- 子节点 (递归) -->
     <div v-if="item.is_dir && expanded">
       <div v-if="childLoading" class="flex items-center gap-1.5 py-0.5 text-gray-400" :style="{ paddingLeft: `${(depth + 1) * 16 + 4}px` }">
@@ -87,9 +126,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { listDir } from '@/api'
 import type { ListDirItem } from '@/api'
+import SymlinkDialog from '@/components/SymlinkDialog.vue'
 
 const props = defineProps<{
   item: ListDirItem
@@ -101,6 +141,10 @@ const children = ref<ListDirItem[]>([])
 const childLoading = ref(false)
 const childError = ref('')
 const loaded = ref(false)
+
+// 右键菜单状态
+const ctxMenu = ref({ show: false, x: 0, y: 0 })
+const showSymlinkDialog = ref(false)
 
 const symlinkTargetName = computed(() => {
   if (!props.item.symlink_target) return ''
@@ -114,6 +158,42 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
+
+function onContextMenu(e: MouseEvent) {
+  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY }
+}
+
+function closeCtxMenu() {
+  ctxMenu.value.show = false
+}
+
+function handleCreateSymlink() {
+  closeCtxMenu()
+  showSymlinkDialog.value = true
+}
+
+function handleCopyPath() {
+  closeCtxMenu()
+  navigator.clipboard?.writeText(props.item.path)
+}
+
+function onSymlinkCreated() {
+  // 刷新当前目录的父节点 — 简单方案：标记需要重新加载
+  // 由于 symlink 可能创建在其他位置，这里不一定能刷新到
+}
+
+// 全局点击关闭菜单
+function onGlobalClick() {
+  if (ctxMenu.value.show) closeCtxMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('click', onGlobalClick)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onGlobalClick)
+})
 
 async function toggle() {
   if (!props.item.is_dir) return

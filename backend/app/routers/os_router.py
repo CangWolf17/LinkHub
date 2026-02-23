@@ -724,3 +724,123 @@ async def list_directory(
         path=str(resolved),
         items=items,
     )
+
+
+# ── 创建符号链接端点 ─────────────────────────────────────
+
+
+class CreateSymlinkRequest(BaseModel):
+    """创建符号链接请求"""
+
+    source_path: str = Field(
+        ..., description="源目录/文件的绝对路径（链接指向的真实路径）"
+    )
+    link_path: str = Field(..., description="符号链接的绝对路径（将要创建的链接位置）")
+
+
+class CreateSymlinkResponse(BaseModel):
+    """创建符号链接响应"""
+
+    success: bool
+    message: str
+    link_path: str = ""
+    source_path: str = ""
+
+
+@router.post(
+    "/create-symlink",
+    response_model=CreateSymlinkResponse,
+    summary="创建目录符号链接（junction）",
+)
+async def create_symlink(
+    req: CreateSymlinkRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    创建目录符号链接。在 Windows 上使用 junction（不需要管理员权限）。
+    源路径和链接路径都必须在白名单目录内。
+    """
+    source_resolved = _sanitize_and_resolve(req.source_path)
+    allowed_dirs = await _get_allowed_dirs(db)
+
+    # 白名单校验 — 源路径
+    if not _validate_path_within_whitelist(source_resolved, allowed_dirs):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"源路径不在允许的白名单目录内: {source_resolved}",
+        )
+
+    # 源路径必须是已存在的目录
+    if not source_resolved.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"源路径不存在或不是目录: {source_resolved}",
+        )
+
+    # 链接路径验证
+    link_raw = req.link_path.strip()
+    if ".." in link_raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="链接路径中不允许包含 '..'",
+        )
+
+    link_path = Path(link_raw)
+    if not link_path.is_absolute():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="必须提供绝对路径",
+        )
+
+    # 链接的父目录必须存在
+    link_parent = link_path.parent.resolve()
+    if not link_parent.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"链接的父目录不存在: {link_parent}",
+        )
+
+    # 白名单校验 — 链接父目录
+    if not _validate_path_within_whitelist(link_parent, allowed_dirs):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"链接路径不在允许的白名单目录内: {link_parent}",
+        )
+
+    # 链接路径不能已存在
+    if link_path.exists() or link_path.is_symlink():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"链接路径已存在: {link_path}",
+        )
+
+    # 创建 junction (Windows) 或 symlink (Linux/macOS)
+    try:
+        if sys.platform == "win32":
+            # Windows: 使用 subprocess 调用 mklink /J 创建 junction
+            # junction 不需要管理员权限
+            result = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link_path), str(source_resolved)],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if result.returncode != 0:
+                err_msg = result.stderr.strip() or result.stdout.strip() or "未知错误"
+                raise OSError(err_msg)
+        else:
+            os.symlink(str(source_resolved), str(link_path), target_is_directory=True)
+
+        logger.info("已创建符号链接: %s -> %s", link_path, source_resolved)
+        return CreateSymlinkResponse(
+            success=True,
+            message="符号链接创建成功",
+            link_path=str(link_path),
+            source_path=str(source_resolved),
+        )
+    except OSError as e:
+        logger.error("创建符号链接失败: %s -> %s: %s", link_path, source_resolved, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"创建符号链接失败: {e}",
+        )

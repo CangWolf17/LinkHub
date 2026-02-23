@@ -391,6 +391,12 @@ export const extractIcon = (executablePath: string, size = 32) =>
 export const listDir = (path: string) =>
   http.post<ListDirResponse>('/os/list-dir', { path })
 
+export const createSymlink = (sourcePath: string, linkPath: string) =>
+  http.post<{ success: boolean; message: string; link_path: string; source_path: string }>('/os/create-symlink', {
+    source_path: sourcePath,
+    link_path: linkPath,
+  })
+
 // ── Logs ─────────────────────────────────────────────────
 
 export interface LogEntry {
