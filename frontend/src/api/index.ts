@@ -362,6 +362,12 @@ export const openDir = (targetPath: string) =>
 export const browseDir = (path?: string) =>
   http.post<BrowseDirResponse>('/os/browse-dir', { path: path || null })
 
+export const extractIcon = (executablePath: string, size = 32) =>
+  http.post<{ success: boolean; icon_base64: string; message: string }>('/os/extract-icon', {
+    executable_path: executablePath,
+    size,
+  })
+
 // ── Logs ─────────────────────────────────────────────────
 
 export interface LogEntry {

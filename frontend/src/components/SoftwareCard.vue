@@ -18,9 +18,15 @@
               class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
               @change="$emit('toggle-select', software.id)"
             />
-            <span class="text-lg flex-shrink-0">
+            <span v-if="!iconData" class="text-lg flex-shrink-0">
               {{ software.is_missing ? '⚠️' : isResourceOnly ? '📁' : '📦' }}
             </span>
+            <img
+              v-else
+              :src="'data:image/png;base64,' + iconData"
+              class="w-5 h-5 flex-shrink-0 object-contain"
+              alt="icon"
+            />
             <h3
               class="text-sm font-semibold truncate"
               :class="software.is_missing ? 'text-gray-400 line-through' : 'text-gray-900'"
@@ -184,9 +190,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import type { Software } from '@/api'
-import { generateSoftwareDescription, updateSoftware } from '@/api'
+import { generateSoftwareDescription, updateSoftware, extractIcon } from '@/api'
 import AiPromptDialog from '@/components/AiPromptDialog.vue'
 
 const props = defineProps<{
@@ -215,6 +221,26 @@ const showAiDialog = ref(false)
 // 资源类判断：exe不存在但目录存在
 const isResourceOnly = computed(() => {
   return props.software.exe_exists === false && props.software.dir_exists === true
+})
+
+// 图标数据
+const iconData = ref<string | null>(null)
+
+// 加载 exe 图标
+async function loadIcon() {
+  if (!props.software.executable_path || props.software.is_missing || isResourceOnly.value) return
+  try {
+    const { data } = await extractIcon(props.software.executable_path, 32)
+    if (data.success && data.icon_base64) {
+      iconData.value = data.icon_base64
+    }
+  } catch {
+    // 图标加载失败，使用默认 emoji
+  }
+}
+
+onMounted(() => {
+  loadIcon()
 })
 
 const parentDir = computed(() => {

@@ -8,12 +8,14 @@
   4. 非阻塞执行 — subprocess.Popen + DETACHED_PROCESS，绝不阻塞主线程
 """
 
+import base64
 import ctypes
 import logging
 import os
 import subprocess
 import sys
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
@@ -393,3 +395,211 @@ async def browse_directory(req: BrowseDirRequest):
         parent=parent,
         items=items,
     )
+
+
+# ── 图标提取端点 ─────────────────────────────────────────
+
+
+class IconRequest(BaseModel):
+    """图标提取请求"""
+
+    executable_path: str = Field(..., description="可执行文件绝对路径")
+    size: int = Field(32, description="图标尺寸 (16/32/48)")
+
+
+class IconResponse(BaseModel):
+    """图标提取响应"""
+
+    success: bool
+    icon_base64: str = Field("", description="PNG 图标的 base64 编码")
+    message: str = ""
+
+
+def _extract_icon_windows(exe_path: str, size: int = 32) -> str | None:
+    """
+    Windows 平台提取 exe 图标，返回 base64 编码的 PNG。
+    使用 ctypes 调用 Win32 API: SHGetFileInfoW 或直接用 Pillow 读取 ico。
+    """
+    try:
+        from PIL import Image
+
+        # 方法1: 使用 icoextract 从 PE 资源读取（纯 Python）
+        try:
+            import struct
+
+            with open(exe_path, "rb") as f:
+                # 读取 PE 头查找 icon 资源
+                data = f.read()
+
+            # 尝试在 exe 中找到 ICO 数据（简化方案：使用 shell32 提取）
+            raise ImportError("fallback to shell method")
+        except (ImportError, Exception):
+            pass
+
+        # 方法2: 使用 Win32 API 提取图标
+        try:
+            # 使用 shell32.ExtractIconExW 提取图标句柄
+            shell32 = ctypes.windll.shell32
+            large_icons = (ctypes.c_void_p * 1)()
+            small_icons = (ctypes.c_void_p * 1)()
+
+            count = shell32.ExtractIconExW(exe_path, 0, large_icons, small_icons, 1)
+            if count == 0:
+                return None
+
+            # 选择合适大小的图标
+            hicon = large_icons[0] if size >= 32 else small_icons[0]
+            if not hicon:
+                hicon = large_icons[0] or small_icons[0]
+
+            if not hicon:
+                return None
+
+            # 使用 GDI+ 将 HICON 转换为 bitmap
+            user32 = ctypes.windll.user32
+            gdi32 = ctypes.windll.gdi32
+
+            class ICONINFO(ctypes.Structure):
+                _fields_ = [
+                    ("fIcon", ctypes.c_bool),
+                    ("xHotspot", ctypes.c_ulong),
+                    ("yHotspot", ctypes.c_ulong),
+                    ("hbmMask", ctypes.c_void_p),
+                    ("hbmColor", ctypes.c_void_p),
+                ]
+
+            class BITMAP(ctypes.Structure):
+                _fields_ = [
+                    ("bmType", ctypes.c_long),
+                    ("bmWidth", ctypes.c_long),
+                    ("bmHeight", ctypes.c_long),
+                    ("bmWidthBytes", ctypes.c_long),
+                    ("bmPlanes", ctypes.c_ushort),
+                    ("bmBitsPixel", ctypes.c_ushort),
+                    ("bmBits", ctypes.c_void_p),
+                ]
+
+            class BITMAPINFOHEADER(ctypes.Structure):
+                _fields_ = [
+                    ("biSize", ctypes.c_ulong),
+                    ("biWidth", ctypes.c_long),
+                    ("biHeight", ctypes.c_long),
+                    ("biPlanes", ctypes.c_ushort),
+                    ("biBitCount", ctypes.c_ushort),
+                    ("biCompression", ctypes.c_ulong),
+                    ("biSizeImage", ctypes.c_ulong),
+                    ("biXPelsPerMeter", ctypes.c_long),
+                    ("biYPelsPerMeter", ctypes.c_long),
+                    ("biClrUsed", ctypes.c_ulong),
+                    ("biClrImportant", ctypes.c_ulong),
+                ]
+
+            # 获取图标信息
+            icon_info = ICONINFO()
+            if not user32.GetIconInfo(hicon, ctypes.byref(icon_info)):
+                user32.DestroyIcon(large_icons[0])
+                if small_icons[0]:
+                    user32.DestroyIcon(small_icons[0])
+                return None
+
+            # 获取 bitmap 信息
+            bmp = BITMAP()
+            gdi32.GetObjectW(
+                icon_info.hbmColor, ctypes.sizeof(BITMAP), ctypes.byref(bmp)
+            )
+
+            width = bmp.bmWidth
+            height = bmp.bmHeight
+
+            # 准备 BITMAPINFO
+            bmi = BITMAPINFOHEADER()
+            bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            bmi.biWidth = width
+            bmi.biHeight = -height  # top-down
+            bmi.biPlanes = 1
+            bmi.biBitCount = 32
+            bmi.biCompression = 0  # BI_RGB
+
+            # 获取位图数据
+            hdc = user32.GetDC(0)
+            buf_size = width * height * 4
+            buf = ctypes.create_string_buffer(buf_size)
+
+            gdi32.GetDIBits(
+                hdc,
+                icon_info.hbmColor,
+                0,
+                height,
+                buf,
+                ctypes.byref(bmi),
+                0,  # DIB_RGB_COLORS
+            )
+
+            user32.ReleaseDC(0, hdc)
+
+            # 转换 BGRA -> RGBA
+            raw = bytearray(buf.raw)
+            for i in range(0, len(raw), 4):
+                raw[i], raw[i + 2] = raw[i + 2], raw[i]
+
+            # 创建 PIL Image
+            img = Image.frombuffer(
+                "RGBA", (width, height), bytes(raw), "raw", "RGBA", 0, 1
+            )
+
+            # 调整大小
+            if img.width != size or img.height != size:
+                img = img.resize((size, size), Image.LANCZOS)
+
+            # 转为 base64 PNG
+            buffer = BytesIO()
+            img.save(buffer, format="PNG")
+            b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+            # 清理
+            gdi32.DeleteObject(icon_info.hbmColor)
+            gdi32.DeleteObject(icon_info.hbmMask)
+            user32.DestroyIcon(large_icons[0])
+            if small_icons[0]:
+                user32.DestroyIcon(small_icons[0])
+
+            return b64
+
+        except Exception as e:
+            logger.debug("Win32 API 图标提取失败: %s", e)
+            return None
+
+    except ImportError:
+        logger.debug("Pillow 未安装，无法提取图标")
+        return None
+
+
+@router.post(
+    "/extract-icon",
+    response_model=IconResponse,
+    summary="提取可执行文件的图标",
+)
+async def extract_icon(
+    req: IconRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """提取 exe 文件的图标并返回 base64 编码的 PNG。"""
+    exe_path = req.executable_path.strip()
+
+    if not exe_path:
+        return IconResponse(success=False, message="路径为空")
+
+    resolved = Path(exe_path)
+    if not resolved.is_file():
+        return IconResponse(success=False, message="文件不存在")
+
+    if sys.platform != "win32":
+        return IconResponse(success=False, message="仅支持 Windows 平台")
+
+    size = max(16, min(req.size, 256))
+
+    icon_b64 = _extract_icon_windows(str(resolved), size)
+    if icon_b64:
+        return IconResponse(success=True, icon_base64=icon_b64)
+    else:
+        return IconResponse(success=False, message="无法提取图标")
