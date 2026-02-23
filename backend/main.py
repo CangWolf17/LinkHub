@@ -196,10 +196,6 @@ async def lifespan(app: FastAPI):
     # 迁移明文 API key → DPAPI 加密
     await _migrate_plaintext_api_key()
 
-    # 打包模式下提前打开浏览器（在 ChromaDB 初始化之前，减少用户感知等待时间）
-    if IS_FROZEN:
-        webbrowser.open(f"http://{APP_HOST}:{APP_PORT}")
-
     # 初始化 ChromaDB 向量数据库（可选，lite 版不含此依赖）
     try:
         from app.core.vector_store import get_chroma_client
@@ -212,6 +208,18 @@ async def lifespan(app: FastAPI):
         logger.error("ChromaDB 初始化失败: %s", exc, exc_info=True)
 
     logger.info("LinkHub 启动完成 -> http://%s:%s", APP_HOST, APP_PORT)
+
+    # 打包模式：服务就绪后才打开浏览器，避免 uvicorn 尚未 accept 时浏览器收到 Not Found
+    if IS_FROZEN:
+        import threading
+
+        def _open_browser():
+            import time
+
+            time.sleep(0.5)  # 留出 0.5s 给 uvicorn 完成端口 accept
+            webbrowser.open(f"http://{APP_HOST}:{APP_PORT}")
+
+        threading.Thread(target=_open_browser, daemon=True).start()
 
     yield
 

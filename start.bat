@@ -19,16 +19,25 @@ if "%DEBUG_MODE%"=="0" (
 echo [DEBUG MODE] Starting with visible console windows...
 echo.
 
-echo [1/3] Starting backend on port 8147...
+echo [1/4] Starting backend on port 8147...
 start "LinkHub-Backend" cmd /k "%~dp0backend\run.bat"
 
-echo [2/3] Waiting for backend to be ready...
-timeout /t 3 /nobreak >nul
+echo [2/4] Waiting for backend to be ready...
+:wait_backend
+timeout /t 1 /nobreak >nul
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8147/api/health' -TimeoutSec 1 -UseBasicParsing; if ($r.StatusCode -eq 200) { exit 0 } } catch { }; exit 1" >nul 2>&1
+if errorlevel 1 goto wait_backend
+echo     Backend is ready.
 
-echo [3/3] Starting frontend on port 5173...
+echo [3/4] Starting frontend on port 5173...
 start "LinkHub-Frontend" cmd /k "%~dp0frontend\run.bat"
 
-timeout /t 3 /nobreak >nul
+echo [4/4] Waiting for frontend to be ready...
+:wait_frontend
+timeout /t 1 /nobreak >nul
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://localhost:5173' -TimeoutSec 1 -UseBasicParsing; if ($r.StatusCode -eq 200) { exit 0 } } catch { }; exit 1" >nul 2>&1
+if errorlevel 1 goto wait_frontend
+echo     Frontend is ready.
 
 echo.
 echo  LinkHub started! (Debug Mode)
