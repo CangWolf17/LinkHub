@@ -68,7 +68,7 @@
           @click="handleCreateSymlink"
         >
           <Link :size="14" />
-          创建符号链接
+          创建目录映射
         </button>
         <button
           class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors text-left"
@@ -83,7 +83,7 @@
     <!-- 符号链接弹窗 -->
     <SymlinkDialog
       v-if="showSymlinkDialog"
-      :source-path="item.path"
+      :target-dir="item.path"
       @close="showSymlinkDialog = false"
       @created="onSymlinkCreated"
     />

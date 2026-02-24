@@ -11,8 +11,17 @@
           <option value="">全部状态</option>
           <option value="not_started">未开始</option>
           <option value="active">进行中</option>
-          <option value="completed">已完成</option>
+          <option value="completed">已过期</option>
           <option value="archived">已归档</option>
+        </select>
+        <!-- 时间分组 -->
+        <select
+          v-model="groupBy"
+          class="px-2 py-1.5 text-xs border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        >
+          <option value="none">不分组</option>
+          <option value="year">按年分组</option>
+          <option value="month">按月分组</option>
         </select>
         <h2 class="text-xl font-bold text-gray-900">工作区</h2>
         <span v-if="dirFilter" class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full truncate max-w-[200px]" :title="dirFilter">
@@ -30,10 +39,11 @@
         <!-- AI 批量 -->
         <button
           v-if="itemsWithoutDescription.length > 0 && !bulkGenerating"
-          class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
+          class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors"
           @click="bulkGenerate"
         >
-          AI 批量清洗 ({{ itemsWithoutDescription.length }})
+          <Sparkles :size="14" />
+          智能补全 ({{ itemsWithoutDescription.length }})
         </button>
         <button
           v-if="bulkGenerating"
@@ -42,15 +52,6 @@
         >
           停止生成 ({{ bulkProgress }}/{{ bulkTotal }})
         </button>
-        <!-- 时间分组 -->
-        <select
-          v-model="groupBy"
-          class="px-2 py-1.5 text-xs border border-gray-200 rounded-lg bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
-        >
-          <option value="none">不分组</option>
-          <option value="year">按年分组</option>
-          <option value="month">按月分组</option>
-        </select>
         <!-- 多选模式切换 -->
         <button
           class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
@@ -87,7 +88,7 @@
             <option value="" selected disabled>批量设置状态...</option>
             <option value="not_started">未开始</option>
             <option value="active">进行中</option>
-            <option value="completed">已完成</option>
+            <option value="completed">已过期</option>
             <option value="archived">已归档</option>
           </select>
         </template>
@@ -121,6 +122,7 @@
             @edit="openEditDialog"
             @delete="handleDelete"
             @toggle-select="toggleSelect"
+            @change-status="handleChangeStatus"
           />
         </div>
         <div v-else-if="archivedItems.length > 0" class="text-center py-8 text-gray-400 text-sm">
@@ -156,6 +158,7 @@
               @edit="openEditDialog"
               @delete="handleDelete"
               @toggle-select="toggleSelect"
+              @change-status="handleChangeStatus"
             />
           </div>
         </div>
@@ -193,6 +196,7 @@
               @edit="openEditDialog"
               @delete="handleDelete"
               @toggle-select="toggleSelect"
+              @change-status="handleChangeStatus"
             />
           </div>
         </transition>
@@ -216,7 +220,7 @@ import { getWorkspaceList, deleteWorkspace, openDir, cleanupDeadWorkspaces, batc
 import type { Workspace } from '@/api'
 import WorkspaceCard from '@/components/WorkspaceCard.vue'
 import WorkspaceDialog from '@/components/WorkspaceDialog.vue'
-import { Unlink, ChevronDown } from 'lucide-vue-next'
+import { Unlink, ChevronDown, Sparkles } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -372,7 +376,7 @@ async function handleBatchStatus(event: Event) {
   const statusLabels: Record<string, string> = {
     not_started: '未开始',
     active: '进行中',
-    completed: '已完成',
+    completed: '已过期',
     archived: '已归档',
   }
   const count = selectedIds.value.size
@@ -433,6 +437,18 @@ async function handleDelete(id: string) {
   } catch { /* ignore */ }
 }
 
+async function handleChangeStatus(id: string, status: string) {
+  try {
+    const { data } = await updateWorkspace(id, { status } as Partial<Workspace>)
+    const idx = allItems.value.findIndex((w) => w.id === id)
+    if (idx !== -1) {
+      allItems.value[idx] = { ...allItems.value[idx], ...data }
+    }
+  } catch {
+    alert('更新状态失败，请重试')
+  }
+}
+
 async function cleanupDead() {
   if (!confirm('将删除所有路径失效的工作区记录，确定?')) return
   try {
@@ -487,11 +503,11 @@ async function bulkGenerate() {
     try {
       const { data } = await aiWorkspaceFillForm(ws.directory_path)
       if (data.success) {
-        // 将 AI 清洗结果（名称 + 描述）写入数据库
+        // 将 AI 清洗结果（名称 + 描述 + 创建日期）写入数据库
         const updates: Record<string, string> = {}
         if (data.name && data.name !== ws.name) updates.name = data.name
         if (data.description) updates.description = data.description
-        if (data.deadline && !ws.deadline) updates.deadline = data.deadline
+        if (data.created_at && !ws.created_at) updates.created_at = data.created_at + 'T00:00:00'
 
         if (Object.keys(updates).length > 0) {
           const { data: updated } = await updateWorkspace(ws.id, updates)
@@ -515,9 +531,39 @@ async function bulkGenerate() {
   alert(`批量清洗完成${stoppedMsg}：成功 ${successCount} 个，失败 ${failCount} 个`)
 }
 
-// 页面离开时自动停止批量生成
+// 页面离开时：若正在批量生成，弹出确认提示
+function beforeUnloadHandler(e: BeforeUnloadEvent) {
+  if (bulkGenerating.value) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', beforeUnloadHandler)
+})
+
 onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', beforeUnloadHandler)
   bulkAbort = true
+})
+
+// Vue Router 路由守卫：离开页面前确认
+const removeGuard = router.beforeEach((_to, _from, next) => {
+  if (bulkGenerating.value) {
+    if (confirm('AI 批量生成正在进行中，离开将终止生成。确定离开吗？')) {
+      bulkAbort = true
+      next()
+    } else {
+      next(false)
+    }
+  } else {
+    next()
+  }
+})
+
+onBeforeUnmount(() => {
+  removeGuard()
 })
 
 // 搜索高亮: 滚动到指定卡片并应用动画

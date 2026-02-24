@@ -679,6 +679,8 @@ async def create_workspace(
         deadline=req.deadline,
         status=req.status,
     )
+    if req.created_at is not None:
+        item.created_at = req.created_at
     db.add(item)
     await db.flush()
     await db.refresh(item)
@@ -1208,11 +1210,11 @@ async def ai_fill_workspace_form(
         "{\n"
         '  "name": "清洗后的可读项目名称（去掉日期前缀如 2024-01-01_、编号前缀、下划线/连字符等，保留有意义的项目名）",\n'
         '  "description": "1-2句简洁中文描述，说明项目用途和特点",\n'
-        '  "deadline": "从目录名中提取的日期 YYYY-MM-DD 格式，如果目录名中没有日期则为 null"\n'
+        '  "created_at": "从目录名中提取的项目创建日期 YYYY-MM-DD 格式，如果目录名中没有日期则为 null"\n'
         "}\n\n"
         "规则:\n"
         "1. name 应简洁易读，如 '2024-03-15_MyProject_v2' → 'MyProject v2'\n"
-        "2. 如果目录名含日期（如 20240315、2024-03-15、2024_0315），提取到 deadline 字段\n"
+        "2. 如果目录名含日期（如 20240315、2024-03-15、2024_0315），提取到 created_at 字段（这是项目的创建日期，不是截止日期）\n"
         "3. description 应基于目录内容推断项目性质，如果目录不存在或为空则根据名称推断\n"
         "4. 只返回 JSON，不要附加任何解释"
     )
@@ -1259,20 +1261,22 @@ async def ai_fill_workspace_form(
         parsed = json.loads(json_match.group())
         name = str(parsed.get("name", dir_name)).strip()
         description = str(parsed.get("description", "")).strip()
-        deadline = parsed.get("deadline")
+        # 优先从 created_at 字段提取，兼容旧模型输出 deadline
+        created_at = parsed.get("created_at") or parsed.get("deadline")
+        deadline = None  # 不再从目录名提取 deadline
 
-        # 校验 deadline 格式
-        if deadline:
-            deadline = str(deadline).strip()
-            if not re.match(r"^\d{4}-\d{2}-\d{2}$", deadline):
-                deadline = None
-            elif deadline.lower() == "null":
-                deadline = None
+        # 校验 created_at 格式
+        if created_at:
+            created_at = str(created_at).strip()
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", created_at):
+                created_at = None
+            elif created_at.lower() == "null":
+                created_at = None
 
         logger.info(
-            "[LLM-RES] AI 填充表单 | name=%s | deadline=%s | desc=%s",
+            "[LLM-RES] AI 填充表单 | name=%s | created_at=%s | desc=%s",
             name,
-            deadline,
+            created_at,
             description[:50],
         )
 
@@ -1280,6 +1284,7 @@ async def ai_fill_workspace_form(
             success=True,
             name=name,
             description=description,
+            created_at=created_at,
             deadline=deadline,
             model=getattr(response, "model", model) or model,
             message="表单填充成功",

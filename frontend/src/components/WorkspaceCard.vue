@@ -3,6 +3,7 @@
     :data-id="workspace.id"
     class="bg-white rounded-xl border shadow-sm overflow-hidden transition-all hover:shadow-md"
     :class="cardBorderClass"
+    @contextmenu="openContextMenu"
   >
     <div class="p-4">
       <!-- 标题行 -->
@@ -16,7 +17,8 @@
             class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0 cursor-pointer"
             @change="$emit('toggle-select', workspace.id)"
           />
-          <component :is="statusIconComponent" :size="18" class="flex-shrink-0" :class="statusIconClass" />
+          <span v-if="workspace.is_missing" class="flex-shrink-0 text-base">&#9888;&#65039;</span>
+          <span v-else class="flex-shrink-0 text-base">{{ statusEmoji }}</span>
           <h3
             class="text-sm font-semibold truncate"
             :class="workspace.is_missing ? 'text-gray-400 line-through' : 'text-gray-900'"
@@ -111,13 +113,18 @@
       <DirectoryTree :root-path="workspace.directory_path" />
     </div>
   </div>
+
+  <!-- 右键菜单 -->
+  <ContextMenu ref="contextMenuRef" :items="contextMenuItems" />
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { Workspace } from '@/api'
 import DirectoryTree from '@/components/DirectoryTree.vue'
-import { AlertTriangle, Hourglass, CircleDot, CircleCheckBig, Archive, FolderOpen, Pencil, Trash2, ChevronDown } from 'lucide-vue-next'
+import ContextMenu from '@/components/ContextMenu.vue'
+import type { ContextMenuItem } from '@/components/ContextMenu.vue'
+import { FolderOpen, Pencil, Trash2, ChevronDown } from 'lucide-vue-next'
 
 const props = defineProps<{
   workspace: Workspace
@@ -125,34 +132,25 @@ const props = defineProps<{
   selected?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   openDir: [path: string]
   edit: [workspace: Workspace]
   delete: [id: string]
   'toggle-select': [id: string]
+  'change-status': [id: string, status: string]
 }>()
 
 const treeExpanded = ref(false)
 
-const statusIconComponent = computed(() => {
-  if (props.workspace.is_missing) return AlertTriangle
-  switch (props.workspace.status) {
-    case 'not_started': return Hourglass
-    case 'active': return CircleDot
-    case 'completed': return CircleCheckBig
-    case 'archived': return Archive
-    default: return FolderOpen
-  }
-})
+const isArchived = computed(() => props.workspace.status === 'archived')
 
-const statusIconClass = computed(() => {
-  if (props.workspace.is_missing) return 'text-amber-500'
+const statusEmoji = computed(() => {
   switch (props.workspace.status) {
-    case 'not_started': return 'text-yellow-500'
-    case 'active': return 'text-green-500'
-    case 'completed': return 'text-blue-500'
-    case 'archived': return 'text-gray-400'
-    default: return 'text-gray-400'
+    case 'not_started': return '\u23F3'  // ⏳ hourglass
+    case 'active': return '\u{1F7E2}'    // 🟢 green circle
+    case 'completed': return '\u{1F55B}'  // 🕛 clock
+    case 'archived': return '\u{1F4E6}'   // 📦 package
+    default: return '\u{1F4C1}'           // 📁 folder
   }
 })
 
@@ -160,7 +158,7 @@ const statusLabel = computed(() => {
   switch (props.workspace.status) {
     case 'not_started': return '未开始'
     case 'active': return '进行中'
-    case 'completed': return '已完成'
+    case 'completed': return '已过期'
     case 'archived': return '已归档'
     default: return props.workspace.status
   }
@@ -168,21 +166,12 @@ const statusLabel = computed(() => {
 
 const statusBadgeClass = computed(() => {
   switch (props.workspace.status) {
-    case 'not_started': return 'bg-yellow-50 text-yellow-700'
-    case 'active': return 'bg-green-50 text-green-700'
-    case 'completed': return 'bg-blue-50 text-blue-700'
-    case 'archived': return 'bg-gray-100 text-gray-600'
+    case 'not_started': return 'bg-slate-100 text-slate-600'
+    case 'active': return 'bg-emerald-50 text-emerald-700'
+    case 'completed': return 'bg-slate-100 text-slate-500'
+    case 'archived': return 'bg-gray-100 text-gray-500'
     default: return 'bg-gray-100 text-gray-600'
   }
-})
-
-const cardBorderClass = computed(() => {
-  if (props.workspace.is_missing) return 'border-gray-300 opacity-60'
-  if (deadlineDaysLeft.value !== null) {
-    if (deadlineDaysLeft.value < 0) return 'border-red-300'
-    if (deadlineDaysLeft.value <= 3) return 'border-orange-300'
-  }
-  return 'border-gray-200'
 })
 
 const deadlineDaysLeft = computed(() => {
@@ -193,19 +182,101 @@ const deadlineDaysLeft = computed(() => {
   return Math.ceil(diff / (1000 * 60 * 60 * 24))
 })
 
+// 分级截止提醒样式（归档状态抑制所有紧急样式）
+const cardBorderClass = computed(() => {
+  if (props.workspace.is_missing) return 'border-gray-300 opacity-60'
+  if (isArchived.value) return 'border-gray-200'
+  if (deadlineDaysLeft.value !== null) {
+    if (deadlineDaysLeft.value < 0) return 'border-red-300'
+    if (deadlineDaysLeft.value <= 3) return 'border-orange-300'
+    if (deadlineDaysLeft.value <= 7) return 'border-amber-200'
+  }
+  return 'border-gray-200'
+})
+
 const deadlineClass = computed(() => {
   if (deadlineDaysLeft.value === null) return ''
+  // 归档状态：统一使用柔和灰色，不显示紧急配色
+  if (isArchived.value) return 'bg-gray-100 text-gray-500'
+  // 分级紧急度配色
   if (deadlineDaysLeft.value < 0) return 'bg-red-100 text-red-700'
   if (deadlineDaysLeft.value <= 3) return 'bg-orange-100 text-orange-700'
+  if (deadlineDaysLeft.value <= 7) return 'bg-amber-50 text-amber-700'
+  if (deadlineDaysLeft.value <= 14) return 'bg-blue-50 text-blue-600'
   return 'bg-gray-100 text-gray-600'
 })
 
 const deadlineLabel = computed(() => {
   if (deadlineDaysLeft.value === null) return ''
+  // 归档状态：只显示日期，不显示超期警告
+  if (isArchived.value) {
+    const d = new Date(props.workspace.deadline!)
+    return d.toLocaleDateString('zh-CN')
+  }
   if (deadlineDaysLeft.value < 0) return `已超期 ${Math.abs(deadlineDaysLeft.value)} 天`
   if (deadlineDaysLeft.value === 0) return '今天截止'
   if (deadlineDaysLeft.value <= 3) return `剩余 ${deadlineDaysLeft.value} 天`
+  if (deadlineDaysLeft.value <= 7) return `剩余 ${deadlineDaysLeft.value} 天`
+  if (deadlineDaysLeft.value <= 14) return `剩余 ${deadlineDaysLeft.value} 天`
   const d = new Date(props.workspace.deadline!)
   return d.toLocaleDateString('zh-CN')
 })
+
+// ── 右键菜单 ──────────────────────────────────────────────
+const contextMenuRef = ref<InstanceType<typeof ContextMenu> | null>(null)
+
+const statusOptions: Array<{ value: string; label: string; emoji: string }> = [
+  { value: 'not_started', label: '未开始', emoji: '\u23F3' },
+  { value: 'active', label: '进行中', emoji: '\u{1F7E2}' },
+  { value: 'completed', label: '已过期', emoji: '\u{1F55B}' },
+  { value: 'archived', label: '已归档', emoji: '\u{1F4E6}' },
+]
+
+const contextMenuItems = computed<ContextMenuItem[]>(() => {
+  const items: ContextMenuItem[] = []
+
+  // 打开目录
+  if (!props.workspace.is_missing) {
+    items.push({
+      label: '打开目录',
+      icon: FolderOpen,
+      action: () => emit('openDir', props.workspace.directory_path),
+    })
+  }
+
+  // 编辑
+  items.push({
+    label: '编辑',
+    icon: Pencil,
+    action: () => emit('edit', props.workspace),
+  })
+
+  items.push({ separator: true })
+
+  // 设置状态（列出所有可选状态，排除当前状态）
+  for (const opt of statusOptions) {
+    if (opt.value === props.workspace.status) continue
+    items.push({
+      label: `设为「${opt.label}」`,
+      emoji: opt.emoji,
+      action: () => emit('change-status', props.workspace.id, opt.value),
+    })
+  }
+
+  items.push({ separator: true })
+
+  // 删除
+  items.push({
+    label: '删除',
+    icon: Trash2,
+    danger: true,
+    action: () => emit('delete', props.workspace.id),
+  })
+
+  return items
+})
+
+function openContextMenu(e: MouseEvent) {
+  contextMenuRef.value?.open(e)
+}
 </script>

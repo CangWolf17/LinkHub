@@ -274,14 +274,52 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">
             软件 AI 黑名单
-            <span class="text-xs text-gray-400 font-normal ml-1">名称匹配的软件将跳过 AI 批量操作（每行一个）</span>
+            <span class="text-xs text-gray-400 font-normal ml-1">名称匹配的软件将跳过 AI 批量操作</span>
           </label>
-          <textarea
-            v-model="blacklistSoftwareText"
-            rows="3"
-            placeholder="每行一个软件名称，如：&#10;7-Zip&#10;Notepad++"
-            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y font-mono"
-          />
+
+          <!-- 已选标签 -->
+          <div v-if="form.ai_blacklist_software.length > 0" class="flex flex-wrap gap-1.5 mb-2">
+            <span
+              v-for="name in form.ai_blacklist_software"
+              :key="name"
+              class="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-red-50 text-red-700 rounded-full"
+            >
+              {{ name }}
+              <button
+                class="text-red-400 hover:text-red-600 transition-colors"
+                @click="removeSoftwareBlacklist(name)"
+              >
+                <X :size="12" />
+              </button>
+            </span>
+          </div>
+
+          <!-- 卡片选择器 -->
+          <div class="relative">
+            <input
+              v-model="swBlacklistSearch"
+              type="text"
+              placeholder="搜索并添加软件到黑名单..."
+              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              @focus="swBlacklistDropdownOpen = true"
+              @input="swBlacklistDropdownOpen = true"
+            />
+            <!-- 下拉列表 -->
+            <div
+              v-if="swBlacklistDropdownOpen && filteredSwForBlacklist.length > 0"
+              class="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto"
+            >
+              <button
+                v-for="sw in filteredSwForBlacklist"
+                :key="sw.id"
+                class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-blue-50 transition-colors"
+                @mousedown.prevent="addSoftwareBlacklist(sw.name)"
+              >
+                <span class="text-gray-400">+</span>
+                <span class="text-gray-800 truncate">{{ sw.name }}</span>
+              </button>
+            </div>
+          </div>
           <p class="text-xs text-gray-400 mt-1">当前 {{ form.ai_blacklist_software.length }} 项</p>
         </div>
 
@@ -289,14 +327,52 @@
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">
             工作区 AI 黑名单
-            <span class="text-xs text-gray-400 font-normal ml-1">名称匹配的工作区将跳过 AI 批量操作（每行一个）</span>
+            <span class="text-xs text-gray-400 font-normal ml-1">名称匹配的工作区将跳过 AI 批量操作</span>
           </label>
-          <textarea
-            v-model="blacklistWorkspaceText"
-            rows="3"
-            placeholder="每行一个工作区名称"
-            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y font-mono"
-          />
+
+          <!-- 已选标签 -->
+          <div v-if="form.ai_blacklist_workspace.length > 0" class="flex flex-wrap gap-1.5 mb-2">
+            <span
+              v-for="name in form.ai_blacklist_workspace"
+              :key="name"
+              class="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-red-50 text-red-700 rounded-full"
+            >
+              {{ name }}
+              <button
+                class="text-red-400 hover:text-red-600 transition-colors"
+                @click="removeWorkspaceBlacklist(name)"
+              >
+                <X :size="12" />
+              </button>
+            </span>
+          </div>
+
+          <!-- 卡片选择器 -->
+          <div class="relative">
+            <input
+              v-model="wsBlacklistSearch"
+              type="text"
+              placeholder="搜索并添加工作区到黑名单..."
+              class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              @focus="wsBlacklistDropdownOpen = true"
+              @input="wsBlacklistDropdownOpen = true"
+            />
+            <!-- 下拉列表 -->
+            <div
+              v-if="wsBlacklistDropdownOpen && filteredWsForBlacklist.length > 0"
+              class="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto"
+            >
+              <button
+                v-for="ws in filteredWsForBlacklist"
+                :key="ws.id"
+                class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-blue-50 transition-colors"
+                @mousedown.prevent="addWorkspaceBlacklist(ws.name)"
+              >
+                <span class="text-gray-400">+</span>
+                <span class="text-gray-800 truncate">{{ ws.name }}</span>
+              </button>
+            </div>
+          </div>
           <p class="text-xs text-gray-400 mt-1">当前 {{ form.ai_blacklist_workspace.length }} 项</p>
         </div>
 
@@ -452,7 +528,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, computed } from 'vue'
 import {
   getLlmConfig, updateLlmConfig, testLlmConnection,
   getIndexStats, reindexAll,
@@ -462,8 +538,9 @@ import {
   getPortConfig, updatePortConfig,
   exportSettings, importSettings,
   getHealth,
+  getSoftwareList, getWorkspaceList,
 } from '@/api'
-import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse, DirEntry } from '@/api'
+import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse, DirEntry, Software, Workspace } from '@/api'
 import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
 import ApiUrlCombobox from '@/components/ApiUrlCombobox.vue'
 import { LLM_API_PRESETS } from '@/constants/llmPresets'
@@ -564,19 +641,75 @@ const messageClass = computed(() =>
     : 'bg-red-50 text-red-700 border border-red-200',
 )
 
-// 黑名单: textarea 文本 <-> 数组 双向绑定
-const blacklistSoftwareText = computed({
-  get: () => form.ai_blacklist_software.join('\n'),
-  set: (val: string) => {
-    form.ai_blacklist_software = val.split('\n').map(s => s.trim()).filter(Boolean)
-  },
+// 黑名单: 卡片选择模式
+const allSoftwareItems = ref<Software[]>([])
+const allWorkspaceItems = ref<Workspace[]>([])
+const swBlacklistSearch = ref('')
+const wsBlacklistSearch = ref('')
+const swBlacklistDropdownOpen = ref(false)
+const wsBlacklistDropdownOpen = ref(false)
+
+async function loadBlacklistCards() {
+  try {
+    const [swRes, wsRes] = await Promise.all([getSoftwareList(), getWorkspaceList()])
+    allSoftwareItems.value = swRes.data.items
+    allWorkspaceItems.value = wsRes.data.items
+  } catch { /* ignore */ }
+}
+
+// 过滤出不在黑名单中的软件，支持搜索
+const filteredSwForBlacklist = computed(() => {
+  const blackSet = new Set(form.ai_blacklist_software.map(n => n.toLowerCase()))
+  let list = allSoftwareItems.value.filter(sw => !blackSet.has(sw.name.toLowerCase()))
+  if (swBlacklistSearch.value.trim()) {
+    const q = swBlacklistSearch.value.toLowerCase()
+    list = list.filter(sw => sw.name.toLowerCase().includes(q))
+  }
+  return list.slice(0, 20)
 })
-const blacklistWorkspaceText = computed({
-  get: () => form.ai_blacklist_workspace.join('\n'),
-  set: (val: string) => {
-    form.ai_blacklist_workspace = val.split('\n').map(s => s.trim()).filter(Boolean)
-  },
+
+const filteredWsForBlacklist = computed(() => {
+  const blackSet = new Set(form.ai_blacklist_workspace.map(n => n.toLowerCase()))
+  let list = allWorkspaceItems.value.filter(ws => !blackSet.has(ws.name.toLowerCase()))
+  if (wsBlacklistSearch.value.trim()) {
+    const q = wsBlacklistSearch.value.toLowerCase()
+    list = list.filter(ws => ws.name.toLowerCase().includes(q))
+  }
+  return list.slice(0, 20)
 })
+
+function addSoftwareBlacklist(name: string) {
+  if (!form.ai_blacklist_software.includes(name)) {
+    form.ai_blacklist_software.push(name)
+  }
+  swBlacklistSearch.value = ''
+  swBlacklistDropdownOpen.value = false
+}
+
+function removeSoftwareBlacklist(name: string) {
+  form.ai_blacklist_software = form.ai_blacklist_software.filter(n => n !== name)
+}
+
+function addWorkspaceBlacklist(name: string) {
+  if (!form.ai_blacklist_workspace.includes(name)) {
+    form.ai_blacklist_workspace.push(name)
+  }
+  wsBlacklistSearch.value = ''
+  wsBlacklistDropdownOpen.value = false
+}
+
+function removeWorkspaceBlacklist(name: string) {
+  form.ai_blacklist_workspace = form.ai_blacklist_workspace.filter(n => n !== name)
+}
+
+// 全局点击关闭下拉
+function closeBlacklistDropdowns(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (!target.closest('.relative')) {
+    swBlacklistDropdownOpen.value = false
+    wsBlacklistDropdownOpen.value = false
+  }
+}
 
 async function loadConfig() {
   try {
@@ -838,5 +971,11 @@ onMounted(() => {
   loadStats()
   loadPortConfig()
   loadVersion()
+  loadBlacklistCards()
+  document.addEventListener('click', closeBlacklistDropdowns)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeBlacklistDropdowns)
 })
 </script>

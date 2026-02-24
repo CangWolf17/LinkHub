@@ -5,6 +5,7 @@
       :data-id="software.id"
       class="bg-white rounded-xl border shadow-sm overflow-hidden transition-all hover:shadow-md"
       :class="software.is_missing ? 'border-gray-300 opacity-60' : isResourceOnly ? 'border-amber-200' : 'border-gray-200'"
+      @contextmenu="openContextMenu"
     >
       <div class="p-4">
         <!-- 标题行 -->
@@ -176,6 +177,9 @@
     @cancel="showAiDialog = false"
     @confirm="doGenerate"
   />
+
+  <!-- 右键菜单 -->
+  <ContextMenu ref="contextMenuRef" :items="contextMenuItems" />
 </template>
 
 <script setup lang="ts">
@@ -183,6 +187,8 @@ import { ref, computed, nextTick, onMounted } from 'vue'
 import type { Software } from '@/api'
 import { generateSoftwareDescription, updateSoftware, extractIcon } from '@/api'
 import AiPromptDialog from '@/components/AiPromptDialog.vue'
+import ContextMenu from '@/components/ContextMenu.vue'
+import type { ContextMenuItem } from '@/components/ContextMenu.vue'
 import { AlertTriangle, Folder, Package, Play, FolderOpen, Trash2, Sparkles, Pencil } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -216,16 +222,27 @@ const isResourceOnly = computed(() => {
 // 图标数据
 const iconData = ref<string | null>(null)
 
-// 加载 exe 图标
+// 全局图标缓存（模块级别，所有 SoftwareCard 实例共享）
+const _iconCache = (window as unknown as Record<string, Map<string, string>>).__linkHubIconCache
+  ?? ((window as unknown as Record<string, Map<string, string>>).__linkHubIconCache = new Map<string, string>())
+
+// 加载 exe 图标（带缓存）
 async function loadIcon() {
   if (!props.software.executable_path || props.software.is_missing || isResourceOnly.value) return
+  const cacheKey = props.software.executable_path
+  // 检查缓存
+  if (_iconCache.has(cacheKey)) {
+    iconData.value = _iconCache.get(cacheKey) || null
+    return
+  }
   try {
     const { data } = await extractIcon(props.software.executable_path, 32)
     if (data.success && data.icon_base64) {
       iconData.value = data.icon_base64
+      _iconCache.set(cacheKey, data.icon_base64)
     }
   } catch {
-    // 图标加载失败，使用默认 emoji
+    // 图标加载失败，使用默认图标
   }
 }
 
@@ -306,5 +323,65 @@ async function doGenerate(payload: { customPrompt: string; mode: 'append' | 'ove
   } finally {
     generating.value = false
   }
+}
+
+// ── 右键菜单 ──────────────────────────────────────────────
+const contextMenuRef = ref<InstanceType<typeof ContextMenu> | null>(null)
+
+const contextMenuItems = computed<ContextMenuItem[]>(() => {
+  const items: ContextMenuItem[] = []
+
+  // 启动（仅非资源类、非失效）
+  if (!props.software.is_missing && !isResourceOnly.value && props.software.executable_path) {
+    items.push({
+      label: '启动',
+      icon: Play,
+      action: () => emit('launch', props.software.executable_path),
+    })
+  }
+
+  // 打开目录
+  if (folderPath.value) {
+    items.push({
+      label: '打开所在文件夹',
+      icon: FolderOpen,
+      action: () => emit('open-dir', folderPath.value),
+    })
+  }
+
+  if (items.length > 0) {
+    items.push({ separator: true })
+  }
+
+  // 编辑描述
+  items.push({
+    label: '编辑描述',
+    icon: Pencil,
+    action: () => startEdit(),
+  })
+
+  // AI 生成描述
+  items.push({
+    label: 'AI 生成描述',
+    icon: Sparkles,
+    action: () => handleGenerate(),
+    disabled: generating.value,
+  })
+
+  items.push({ separator: true })
+
+  // 删除
+  items.push({
+    label: '删除',
+    icon: Trash2,
+    danger: true,
+    action: () => emit('delete', props.software.id),
+  })
+
+  return items
+})
+
+function openContextMenu(e: MouseEvent) {
+  contextMenuRef.value?.open(e)
 }
 </script>

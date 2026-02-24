@@ -296,6 +296,18 @@ if FRONTEND_DIST_DIR.is_dir():
     logger.info("前端静态文件已挂载: %s", FRONTEND_DIST_DIR)
 
 
+# ── 开发模式根路径重定向 ──────────────────────────────────
+# 开发模式下 frontend/dist 不存在，访问 :8147/ 会触发 FastAPI 默认 404。
+# 添加根路径路由，引导开发者访问正确的前端地址。
+if not FRONTEND_DIST_DIR.is_dir():
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/", include_in_schema=False)
+    async def dev_root_redirect():
+        """开发模式：重定向到 Vite 开发服务器。"""
+        return RedirectResponse(url=f"http://127.0.0.1:5173")
+
+
 # ── 健康检查 ──────────────────────────────────────────────
 
 

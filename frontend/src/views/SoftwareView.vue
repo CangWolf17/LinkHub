@@ -1,8 +1,8 @@
 <template>
   <div>
     <div class="flex items-center justify-between mb-6">
-      <h2 class="text-xl font-bold text-gray-900">软件舱</h2>
       <div class="flex items-center gap-2">
+        <h2 class="text-xl font-bold text-gray-900">软件舱</h2>
         <!-- 排序选择 -->
         <select
           v-model="sortBy"
@@ -25,6 +25,8 @@
           <option value="">全部类型</option>
           <option v-for="tag in allTags" :key="tag" :value="tag">{{ tag }}</option>
         </select>
+      </div>
+      <div class="flex items-center gap-2">
         <!-- 多选模式切换 -->
         <button
           class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
@@ -55,10 +57,11 @@
         </template>
         <button
           v-if="itemsWithoutDescription.length > 0 && !bulkGenerating"
-          class="px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50"
+          class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50"
           @click="bulkGenerate"
         >
-          AI 批量清洗 ({{ itemsWithoutDescription.length }})
+          <Sparkles :size="14" />
+          智能补全 ({{ itemsWithoutDescription.length }})
         </button>
         <button
           v-if="bulkGenerating"
@@ -69,10 +72,11 @@
         </button>
         <button
           v-if="itemsWithoutTags.length > 0 && !bulkGenerating"
-          class="px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
+          class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition-colors"
           @click="bulkGenerateTags"
         >
-          AI 批量标签 ({{ itemsWithoutTags.length }})
+          <Sparkles :size="14" />
+          批量标签 ({{ itemsWithoutTags.length }})
         </button>
         <button
           class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
@@ -232,7 +236,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getSoftwareList, uploadInstall, deleteSoftware, launchApp, openDir, cleanupDeadSoftware, generateSoftwareDescription, batchDeleteSoftware, scanAndImportSoftware, generateSoftwareTags, getLlmConfig } from '@/api'
 import type { Software } from '@/api'
 import SoftwareCard from '@/components/SoftwareCard.vue'
-import { Unlink, X, ChevronDown, Package } from 'lucide-vue-next'
+import { Unlink, X, ChevronDown, Package, Sparkles } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -258,8 +262,12 @@ const showImportModal = ref(false)
 const scanning = ref(false)
 const scanResult = ref<{ success: boolean; message: string } | null>(null)
 
-// 排序状态
-const sortBy = ref('updated_desc')
+// 排序状态（持久化到 localStorage）
+const sortBy = ref(localStorage.getItem('linkhub_sw_sortBy') || 'updated_desc')
+
+watch(sortBy, (v) => {
+  localStorage.setItem('linkhub_sw_sortBy', v)
+})
 
 // 标签筛选状态
 const filterTag = ref('')
@@ -599,9 +607,39 @@ async function bulkGenerateTags() {
   alert(`批量标签生成完成${stoppedMsg}：成功 ${successCount} 个，失败 ${failCount} 个`)
 }
 
-// 页面离开时自动停止批量生成
+// 页面离开时：若正在批量生成，弹出确认提示
+function beforeUnloadHandler(e: BeforeUnloadEvent) {
+  if (bulkGenerating.value) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', beforeUnloadHandler)
+})
+
 onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', beforeUnloadHandler)
   bulkAbort = true
+})
+
+// Vue Router 路由守卫：离开页面前确认
+const removeGuard = router.beforeEach((_to, _from, next) => {
+  if (bulkGenerating.value) {
+    if (confirm('AI 批量生成正在进行中，离开将终止生成。确定离开吗？')) {
+      bulkAbort = true
+      next()
+    } else {
+      next(false)
+    }
+  } else {
+    next()
+  }
+})
+
+onBeforeUnmount(() => {
+  removeGuard()
 })
 
 // 搜索高亮: 滚动到指定卡片并应用动画

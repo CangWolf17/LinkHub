@@ -70,6 +70,9 @@ class WorkspaceCreate(BaseModel):
     directory_path: str = Field(..., description="工作区目录绝对路径")
     description: str | None = Field(None, description="项目备注")
     deadline: datetime | None = Field(None, description="截止日期")
+    created_at: datetime | None = Field(
+        None, description="创建日期（可选，不填则由服务端自动生成）"
+    )
     status: str = Field(
         "active", description="状态: not_started / active / completed / archived"
     )
@@ -82,6 +85,7 @@ class WorkspaceUpdate(BaseModel):
     directory_path: str | None = None
     description: str | None = None
     deadline: datetime | None = None
+    created_at: datetime | None = None
     status: str | None = None
 
 
@@ -157,6 +161,9 @@ class AiFillFormResponse(BaseModel):
     success: bool
     name: str = Field("", description="清洗后的项目名称")
     description: str = Field("", description="生成的项目描述")
-    deadline: str | None = Field(None, description="提取到的日期 (YYYY-MM-DD) 或 None")
+    created_at: str | None = Field(
+        None, description="从目录名中提取的创建日期 (YYYY-MM-DD) 或 None"
+    )
+    deadline: str | None = Field(None, description="保留字段，暂未使用")
     model: str = Field("", description="使用的模型")
     message: str = ""

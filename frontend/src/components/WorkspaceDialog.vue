@@ -76,6 +76,41 @@
           />
         </div>
 
+        <!-- 创建日期 -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">创建日期 (可选)</label>
+          <div class="relative">
+            <DatePicker
+              v-model="createdAtDate"
+              :masks="{ input: 'YYYY-MM-DD' }"
+              :popover="{ visibility: 'focus' }"
+              color="blue"
+            >
+              <template #default="{ inputValue, inputEvents }">
+                <div class="flex items-center gap-2">
+                  <input
+                    :value="inputValue"
+                    v-on="inputEvents"
+                    type="text"
+                    placeholder="选择创建日期"
+                    readonly
+                    class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+                  />
+                  <button
+                    v-if="createdAtDate"
+                    type="button"
+                    class="absolute right-2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                    title="清除日期"
+                    @click="createdAtDate = null"
+                  >
+                    <X :size="16" />
+                  </button>
+                </div>
+              </template>
+            </DatePicker>
+          </div>
+        </div>
+
         <!-- 截止日期 -->
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">截止日期 (可选)</label>
@@ -120,7 +155,7 @@
           >
             <option value="not_started">未开始</option>
             <option value="active">进行中</option>
-            <option value="completed">已完成</option>
+            <option value="completed">已过期</option>
             <option value="archived">已归档</option>
           </select>
         </div>
@@ -189,11 +224,13 @@ const form = reactive({
   directory_path: '',
   description: '',
   deadline: '',
+  created_at: '',
   status: 'active',
 })
 
-// VCalendar 使用 Date 对象，form.deadline 使用 YYYY-MM-DD 字符串
+// VCalendar 使用 Date 对象，form.deadline / form.created_at 使用 YYYY-MM-DD 字符串
 const deadlineDate = ref<Date | null>(null)
+const createdAtDate = ref<Date | null>(null)
 
 // 同步 Date 对象 → form.deadline 字符串
 watch(deadlineDate, (d) => {
@@ -204,6 +241,18 @@ watch(deadlineDate, (d) => {
     form.deadline = `${yyyy}-${mm}-${dd}`
   } else {
     form.deadline = ''
+  }
+})
+
+// 同步 Date 对象 → form.created_at 字符串
+watch(createdAtDate, (d) => {
+  if (d) {
+    const yyyy = d.getFullYear()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    form.created_at = `${yyyy}-${mm}-${dd}`
+  } else {
+    form.created_at = ''
   }
 })
 
@@ -226,6 +275,12 @@ onMounted(async () => {
       const parsed = new Date(props.workspace.deadline)
       if (!isNaN(parsed.getTime())) {
         deadlineDate.value = parsed
+      }
+    }
+    if (props.workspace.created_at) {
+      const parsed = new Date(props.workspace.created_at)
+      if (!isNaN(parsed.getTime())) {
+        createdAtDate.value = parsed
       }
     }
     form.status = props.workspace.status
@@ -315,10 +370,10 @@ async function handleAiFill() {
     if (data.success) {
       if (data.name) form.name = data.name
       if (data.description) form.description = data.description
-      if (data.deadline) {
-        const parsed = new Date(data.deadline)
+      if (data.created_at) {
+        const parsed = new Date(data.created_at)
         if (!isNaN(parsed.getTime())) {
-          deadlineDate.value = parsed
+          createdAtDate.value = parsed
         }
       }
     } else {
@@ -350,6 +405,9 @@ async function save() {
       payload.deadline = form.deadline + 'T00:00:00'
     } else {
       payload.deadline = null
+    }
+    if (form.created_at) {
+      payload.created_at = form.created_at + 'T00:00:00'
     }
 
     if (isEdit.value && props.workspace) {

@@ -591,7 +591,8 @@ async def extract_icon(
 
     resolved = Path(exe_path)
     if not resolved.is_file():
-        return IconResponse(success=False, message="文件不存在")
+        logger.debug("图标提取失败: 文件不存在 %s", exe_path)
+        return IconResponse(success=False, message=f"文件不存在: {exe_path}")
 
     if sys.platform != "win32":
         return IconResponse(success=False, message="仅支持 Windows 平台")
@@ -602,6 +603,7 @@ async def extract_icon(
     if icon_b64:
         return IconResponse(success=True, icon_base64=icon_b64)
     else:
+        logger.warning("图标提取返回空: %s", exe_path)
         return IconResponse(success=False, message="无法提取图标")
 
 

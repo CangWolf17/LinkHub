@@ -239,7 +239,7 @@ export const generateWorkspaceDescription = (id: string, customPrompt?: string, 
   )
 
 export const aiWorkspaceFillForm = (directoryPath: string) =>
-  http.post<{ success: boolean; name: string; description: string; deadline: string | null; model: string; message: string }>(
+  http.post<{ success: boolean; name: string; description: string; created_at: string | null; deadline: string | null; model: string; message: string }>(
     '/metadata/workspaces/ai-fill-form',
     { directory_path: directoryPath }
   )
