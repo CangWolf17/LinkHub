@@ -54,6 +54,14 @@
           >
             删除选中 ({{ selectedIds.size }})
           </button>
+          <!-- 批量清除描述 -->
+          <button
+            class="px-3 py-1.5 text-xs font-medium text-orange-600 bg-orange-50 rounded-lg hover:bg-orange-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="selectedIds.size === 0"
+            @click="batchClearDescription"
+          >
+            <span class="flex items-center gap-1"><Eraser :size="12" /> 清除描述</span>
+          </button>
         </template>
         <button
           v-if="itemsWithoutDescription.length > 0 && !bulkGenerating"
@@ -157,11 +165,13 @@
           class="flex-shrink-0 w-28 h-28 bg-white border border-gray-200 rounded-xl flex flex-col items-center justify-center gap-2 cursor-pointer hover:shadow-md hover:border-blue-300 transition-all group"
           :title="sw.name"
           @click="sw.executable_path ? handleLaunch(sw.executable_path) : undefined"
+          @contextmenu="onRecentContextMenu($event, sw)"
         >
           <Package :size="24" class="text-blue-500" />
           <span class="text-[11px] font-medium text-gray-700 text-center px-2 truncate w-full group-hover:text-blue-600">{{ sw.name }}</span>
         </div>
       </div>
+      <ContextMenu ref="recentCtxRef" :items="recentCtxItems" />
     </div>
 
     <!-- 软件卡片网格 -->
@@ -227,16 +237,20 @@
         </transition>
       </div>
     </template>
+    <ConfirmDialog ref="confirmRef" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getSoftwareList, uploadInstall, deleteSoftware, launchApp, openDir, cleanupDeadSoftware, generateSoftwareDescription, batchDeleteSoftware, scanAndImportSoftware, generateSoftwareTags, getLlmConfig } from '@/api'
+import { getSoftwareList, uploadInstall, deleteSoftware, updateSoftware, launchApp, openDir, cleanupDeadSoftware, generateSoftwareDescription, batchDeleteSoftware, scanAndImportSoftware, generateSoftwareTags, getLlmConfig } from '@/api'
 import type { Software } from '@/api'
 import SoftwareCard from '@/components/SoftwareCard.vue'
-import { Unlink, X, ChevronDown, Package, Sparkles } from 'lucide-vue-next'
+import ContextMenu from '@/components/ContextMenu.vue'
+import type { ContextMenuItem } from '@/components/ContextMenu.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import { Unlink, X, ChevronDown, Package, Sparkles, Play, FolderOpen, Trash2, Eraser } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -278,6 +292,26 @@ const bulkProgress = ref(0)
 const bulkTotal = ref(0)
 let bulkAbort = false
 const softwareBlacklist = ref<string[]>([])
+
+// 确认弹窗 + 最近使用右键菜单
+const confirmRef = ref<InstanceType<typeof ConfirmDialog> | null>(null)
+const recentCtxRef = ref<InstanceType<typeof ContextMenu> | null>(null)
+const recentCtxTarget = ref<Software | null>(null)
+const recentCtxItems = computed<ContextMenuItem[]>(() => {
+  const sw = recentCtxTarget.value
+  if (!sw) return []
+  const items: ContextMenuItem[] = []
+  if (sw.executable_path) {
+    items.push({ label: '启动', icon: Play, action: () => handleLaunch(sw.executable_path!) })
+  }
+  const folder = sw.executable_path?.replace(/[\\/][^\\/]+$/, '') || sw.install_dir
+  if (folder) {
+    items.push({ label: '打开所在文件夹', icon: FolderOpen, action: () => handleOpenDir(folder) })
+  }
+  items.push({ separator: true })
+  items.push({ label: '删除', icon: Trash2, danger: true, action: () => handleDelete(sw.id) })
+  return items
+})
 
 // 解析标签的工具函数
 function parseTags(tagsStr: string | null): string[] {
@@ -376,7 +410,15 @@ function toggleSelectAll() {
 async function batchDelete() {
   const count = selectedIds.value.size
   if (count === 0) return
-  if (!confirm(`确定删除选中的 ${count} 条软件记录吗？（仅删除数据库记录，不删除本地文件）`)) return
+  const result = await confirmRef.value?.confirm({
+    title: '批量删除',
+    message: `确定删除选中的 ${count} 条软件记录吗？（仅删除数据库记录，不删除本地文件）`,
+    buttons: [
+      { label: '取消', value: 'cancel', class: 'text-gray-600 bg-gray-100 hover:bg-gray-200 focus:ring-gray-400' },
+      { label: '删除', value: 'ok', class: 'text-white bg-red-600 hover:bg-red-700 focus:ring-red-500' },
+    ],
+  })
+  if (result !== 'ok') return
   try {
     const ids = Array.from(selectedIds.value)
     const { data } = await batchDeleteSoftware(ids)
@@ -387,6 +429,28 @@ async function batchDelete() {
   } catch {
     alert('批量删除失败，请重试')
   }
+}
+
+async function batchClearDescription() {
+  const count = selectedIds.value.size
+  if (count === 0) return
+  const result = await confirmRef.value?.confirm({
+    title: '批量清除描述',
+    message: `确定清除选中的 ${count} 条软件的描述信息吗？`,
+  })
+  if (result !== 'ok') return
+  let successCount = 0
+  for (const id of selectedIds.value) {
+    try {
+      const { data } = await updateSoftware(id, { description: null } as Partial<Software>)
+      const idx = items.value.findIndex((s) => s.id === id)
+      if (idx !== -1) items.value[idx] = { ...items.value[idx], ...data, description: null as unknown as string }
+      successCount++
+    } catch { /* ignore */ }
+  }
+  alert(`已清除 ${successCount} 条描述`)
+  selectedIds.value = new Set()
+  selectMode.value = false
 }
 
 async function loadList() {
@@ -488,7 +552,15 @@ async function handleOpenDir(path: string) {
 }
 
 async function handleDelete(id: string) {
-  if (!confirm('确定删除这条记录吗?')) return
+  const result = await confirmRef.value?.confirm({
+    title: '删除确认',
+    message: '确定删除这条记录吗？',
+    buttons: [
+      { label: '取消', value: 'cancel', class: 'text-gray-600 bg-gray-100 hover:bg-gray-200 focus:ring-gray-400' },
+      { label: '删除', value: 'ok', class: 'text-white bg-red-600 hover:bg-red-700 focus:ring-red-500' },
+    ],
+  })
+  if (result !== 'ok') return
   try {
     await deleteSoftware(id)
     items.value = items.value.filter((s) => s.id !== id)
@@ -502,8 +574,21 @@ function handleUpdated(updated: Software) {
   }
 }
 
+function onRecentContextMenu(e: MouseEvent, sw: Software) {
+  recentCtxTarget.value = sw
+  recentCtxRef.value?.open(e)
+}
+
 async function cleanupDead() {
-  if (!confirm('将删除所有路径失效的软件记录，确定?')) return
+  const result = await confirmRef.value?.confirm({
+    title: '清理死链',
+    message: '将删除所有路径失效的软件记录，确定？',
+    buttons: [
+      { label: '取消', value: 'cancel', class: 'text-gray-600 bg-gray-100 hover:bg-gray-200 focus:ring-gray-400' },
+      { label: '清理', value: 'ok', class: 'text-white bg-red-600 hover:bg-red-700 focus:ring-red-500' },
+    ],
+  })
+  if (result !== 'ok') return
   try {
     const { data } = await cleanupDeadSoftware()
     alert(`已清理 ${data.removed_count} 条死链记录`)
@@ -530,7 +615,11 @@ async function bulkGenerate() {
     return
   }
   const skipMsg = skipped > 0 ? `（${skipped} 个黑名单已跳过）` : ''
-  if (!confirm(`将为 ${targets.length} 个无描述的软件执行 AI 清洗（生成描述）${skipMsg}，确定?`)) return
+  const result = await confirmRef.value?.confirm({
+    title: '智能补全',
+    message: `将为 ${targets.length} 个无描述的软件执行 AI 清洗（生成描述）${skipMsg}，确定？`,
+  })
+  if (result !== 'ok') return
 
   bulkGenerating.value = true
   bulkTotal.value = targets.length
@@ -576,7 +665,11 @@ async function bulkGenerateTags() {
     return
   }
   const skipMsg = skipped > 0 ? `（${skipped} 个黑名单已跳过）` : ''
-  if (!confirm(`将为 ${targets.length} 个无标签的软件生成 AI 类型标签${skipMsg}，确定?`)) return
+  const result = await confirmRef.value?.confirm({
+    title: '批量标签',
+    message: `将为 ${targets.length} 个无标签的软件生成 AI 类型标签${skipMsg}，确定？`,
+  })
+  if (result !== 'ok') return
 
   bulkGenerating.value = true
   bulkTotal.value = targets.length
@@ -621,14 +714,26 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', beforeUnloadHandler)
-  bulkAbort = true
+  // 注意：不再在卸载时 abort —— 支持后台继续
 })
 
 // Vue Router 路由守卫：离开页面前确认
-const removeGuard = router.beforeEach((_to, _from, next) => {
+const removeGuard = router.beforeEach(async (_to, _from, next) => {
   if (bulkGenerating.value) {
-    if (confirm('AI 批量生成正在进行中，离开将终止生成。确定离开吗？')) {
+    const result = await confirmRef.value?.confirm({
+      title: 'AI 生成进行中',
+      message: 'AI 批量生成正在进行中，你可以选择后台继续或终止生成。',
+      buttons: [
+        { label: '留在此页', value: 'cancel', class: 'text-gray-600 bg-gray-100 hover:bg-gray-200 focus:ring-gray-400' },
+        { label: '后台继续', value: 'background', class: 'text-white bg-blue-600 hover:bg-blue-700 focus:ring-blue-500' },
+        { label: '终止并离开', value: 'abort', class: 'text-white bg-red-600 hover:bg-red-700 focus:ring-red-500' },
+      ],
+    })
+    if (result === 'abort') {
       bulkAbort = true
+      next()
+    } else if (result === 'background') {
+      // 允许离开但不终止生成
       next()
     } else {
       next(false)

@@ -117,7 +117,11 @@ async def update_allowed_dirs(
             p = str(item.get("path", "")).strip()
             t = str(item.get("type", "software")).strip()
             if p and t in VALID_DIR_TYPES:
-                entries.append(DirEntry(path=p, type=t))
+                entry = DirEntry(path=p, type=t)
+                lbl = str(item.get("label", "")).strip() if item.get("label") else ""
+                if lbl:
+                    entry["label"] = lbl
+                entries.append(entry)
         elif isinstance(item, str):
             p = item.strip()
             if p:

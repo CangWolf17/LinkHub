@@ -12,8 +12,10 @@ import base64
 import ctypes
 import logging
 import os
+import struct
 import subprocess
 import sys
+import zlib
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -415,162 +417,186 @@ class IconResponse(BaseModel):
     message: str = ""
 
 
+def _encode_png(rgba_data: bytes, width: int, height: int) -> bytes:
+    """纯 Python PNG 编码器：将 RGBA 像素数据编码为 PNG 文件字节。"""
+
+    def _chunk(chunk_type: bytes, data: bytes) -> bytes:
+        """构造一个 PNG chunk: length + type + data + crc32。"""
+        out = struct.pack(">I", len(data)) + chunk_type + data
+        crc = zlib.crc32(chunk_type + data) & 0xFFFFFFFF
+        out += struct.pack(">I", crc)
+        return out
+
+    # PNG signature
+    sig = b"\x89PNG\r\n\x1a\n"
+
+    # IHDR: width, height, bit_depth=8, color_type=6(RGBA), compression=0,
+    #        filter=0, interlace=0
+    ihdr_data = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    ihdr = _chunk(b"IHDR", ihdr_data)
+
+    # IDAT: 每行前加 filter byte 0 (None filter), 然后 zlib 压缩
+    raw_rows = bytearray()
+    stride = width * 4
+    for y in range(height):
+        raw_rows.append(0)  # filter byte
+        raw_rows.extend(rgba_data[y * stride : (y + 1) * stride])
+
+    compressed = zlib.compress(bytes(raw_rows), 9)
+    idat = _chunk(b"IDAT", compressed)
+
+    # IEND
+    iend = _chunk(b"IEND", b"")
+
+    return sig + ihdr + idat + iend
+
+
+def _nearest_neighbor_resize(
+    rgba_data: bytes, src_w: int, src_h: int, dst_w: int, dst_h: int
+) -> bytes:
+    """最近邻缩放 RGBA 像素数据。"""
+    src = memoryview(rgba_data)
+    dst = bytearray(dst_w * dst_h * 4)
+    for y in range(dst_h):
+        sy = y * src_h // dst_h
+        for x in range(dst_w):
+            sx = x * src_w // dst_w
+            si = (sy * src_w + sx) * 4
+            di = (y * dst_w + x) * 4
+            dst[di : di + 4] = src[si : si + 4]
+    return bytes(dst)
+
+
 def _extract_icon_windows(exe_path: str, size: int = 32) -> str | None:
     """
-    Windows 平台提取 exe 图标，返回 base64 编码的 PNG。
-    使用 ctypes 调用 Win32 API: SHGetFileInfoW 或直接用 Pillow 读取 ico。
+    Windows 平台提取 exe/lnk 图标，返回 base64 编码的 PNG。
+    纯 ctypes + struct + zlib 实现，不依赖 Pillow。
     """
     try:
-        from PIL import Image
+        # 使用 shell32.ExtractIconExW 提取图标句柄
+        shell32 = ctypes.windll.shell32
+        large_icons = (ctypes.c_void_p * 1)()
+        small_icons = (ctypes.c_void_p * 1)()
 
-        # 方法1: 使用 icoextract 从 PE 资源读取（纯 Python）
-        try:
-            import struct
+        count = shell32.ExtractIconExW(exe_path, 0, large_icons, small_icons, 1)
+        if count == 0:
+            return None
 
-            with open(exe_path, "rb") as f:
-                # 读取 PE 头查找 icon 资源
-                data = f.read()
+        # 选择合适大小的图标
+        hicon = large_icons[0] if size >= 32 else small_icons[0]
+        if not hicon:
+            hicon = large_icons[0] or small_icons[0]
 
-            # 尝试在 exe 中找到 ICO 数据（简化方案：使用 shell32 提取）
-            raise ImportError("fallback to shell method")
-        except (ImportError, Exception):
-            pass
+        if not hicon:
+            return None
 
-        # 方法2: 使用 Win32 API 提取图标
-        try:
-            # 使用 shell32.ExtractIconExW 提取图标句柄
-            shell32 = ctypes.windll.shell32
-            large_icons = (ctypes.c_void_p * 1)()
-            small_icons = (ctypes.c_void_p * 1)()
+        # 使用 GDI 将 HICON 转换为 bitmap
+        user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
 
-            count = shell32.ExtractIconExW(exe_path, 0, large_icons, small_icons, 1)
-            if count == 0:
-                return None
+        class ICONINFO(ctypes.Structure):
+            _fields_ = [
+                ("fIcon", ctypes.c_bool),
+                ("xHotspot", ctypes.c_ulong),
+                ("yHotspot", ctypes.c_ulong),
+                ("hbmMask", ctypes.c_void_p),
+                ("hbmColor", ctypes.c_void_p),
+            ]
 
-            # 选择合适大小的图标
-            hicon = large_icons[0] if size >= 32 else small_icons[0]
-            if not hicon:
-                hicon = large_icons[0] or small_icons[0]
+        class BITMAP(ctypes.Structure):
+            _fields_ = [
+                ("bmType", ctypes.c_long),
+                ("bmWidth", ctypes.c_long),
+                ("bmHeight", ctypes.c_long),
+                ("bmWidthBytes", ctypes.c_long),
+                ("bmPlanes", ctypes.c_ushort),
+                ("bmBitsPixel", ctypes.c_ushort),
+                ("bmBits", ctypes.c_void_p),
+            ]
 
-            if not hicon:
-                return None
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [
+                ("biSize", ctypes.c_ulong),
+                ("biWidth", ctypes.c_long),
+                ("biHeight", ctypes.c_long),
+                ("biPlanes", ctypes.c_ushort),
+                ("biBitCount", ctypes.c_ushort),
+                ("biCompression", ctypes.c_ulong),
+                ("biSizeImage", ctypes.c_ulong),
+                ("biXPelsPerMeter", ctypes.c_long),
+                ("biYPelsPerMeter", ctypes.c_long),
+                ("biClrUsed", ctypes.c_ulong),
+                ("biClrImportant", ctypes.c_ulong),
+            ]
 
-            # 使用 GDI+ 将 HICON 转换为 bitmap
-            user32 = ctypes.windll.user32
-            gdi32 = ctypes.windll.gdi32
-
-            class ICONINFO(ctypes.Structure):
-                _fields_ = [
-                    ("fIcon", ctypes.c_bool),
-                    ("xHotspot", ctypes.c_ulong),
-                    ("yHotspot", ctypes.c_ulong),
-                    ("hbmMask", ctypes.c_void_p),
-                    ("hbmColor", ctypes.c_void_p),
-                ]
-
-            class BITMAP(ctypes.Structure):
-                _fields_ = [
-                    ("bmType", ctypes.c_long),
-                    ("bmWidth", ctypes.c_long),
-                    ("bmHeight", ctypes.c_long),
-                    ("bmWidthBytes", ctypes.c_long),
-                    ("bmPlanes", ctypes.c_ushort),
-                    ("bmBitsPixel", ctypes.c_ushort),
-                    ("bmBits", ctypes.c_void_p),
-                ]
-
-            class BITMAPINFOHEADER(ctypes.Structure):
-                _fields_ = [
-                    ("biSize", ctypes.c_ulong),
-                    ("biWidth", ctypes.c_long),
-                    ("biHeight", ctypes.c_long),
-                    ("biPlanes", ctypes.c_ushort),
-                    ("biBitCount", ctypes.c_ushort),
-                    ("biCompression", ctypes.c_ulong),
-                    ("biSizeImage", ctypes.c_ulong),
-                    ("biXPelsPerMeter", ctypes.c_long),
-                    ("biYPelsPerMeter", ctypes.c_long),
-                    ("biClrUsed", ctypes.c_ulong),
-                    ("biClrImportant", ctypes.c_ulong),
-                ]
-
-            # 获取图标信息
-            icon_info = ICONINFO()
-            if not user32.GetIconInfo(hicon, ctypes.byref(icon_info)):
-                user32.DestroyIcon(large_icons[0])
-                if small_icons[0]:
-                    user32.DestroyIcon(small_icons[0])
-                return None
-
-            # 获取 bitmap 信息
-            bmp = BITMAP()
-            gdi32.GetObjectW(
-                icon_info.hbmColor, ctypes.sizeof(BITMAP), ctypes.byref(bmp)
-            )
-
-            width = bmp.bmWidth
-            height = bmp.bmHeight
-
-            # 准备 BITMAPINFO
-            bmi = BITMAPINFOHEADER()
-            bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-            bmi.biWidth = width
-            bmi.biHeight = -height  # top-down
-            bmi.biPlanes = 1
-            bmi.biBitCount = 32
-            bmi.biCompression = 0  # BI_RGB
-
-            # 获取位图数据
-            hdc = user32.GetDC(0)
-            buf_size = width * height * 4
-            buf = ctypes.create_string_buffer(buf_size)
-
-            gdi32.GetDIBits(
-                hdc,
-                icon_info.hbmColor,
-                0,
-                height,
-                buf,
-                ctypes.byref(bmi),
-                0,  # DIB_RGB_COLORS
-            )
-
-            user32.ReleaseDC(0, hdc)
-
-            # 转换 BGRA -> RGBA
-            raw = bytearray(buf.raw)
-            for i in range(0, len(raw), 4):
-                raw[i], raw[i + 2] = raw[i + 2], raw[i]
-
-            # 创建 PIL Image
-            img = Image.frombuffer(
-                "RGBA", (width, height), bytes(raw), "raw", "RGBA", 0, 1
-            )
-
-            # 调整大小
-            if img.width != size or img.height != size:
-                img = img.resize((size, size), Image.LANCZOS)
-
-            # 转为 base64 PNG
-            buffer = BytesIO()
-            img.save(buffer, format="PNG")
-            b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
-
-            # 清理
-            gdi32.DeleteObject(icon_info.hbmColor)
-            gdi32.DeleteObject(icon_info.hbmMask)
+        # 获取图标信息
+        icon_info = ICONINFO()
+        if not user32.GetIconInfo(hicon, ctypes.byref(icon_info)):
             user32.DestroyIcon(large_icons[0])
             if small_icons[0]:
                 user32.DestroyIcon(small_icons[0])
-
-            return b64
-
-        except Exception as e:
-            logger.debug("Win32 API 图标提取失败: %s", e)
             return None
 
-    except ImportError:
-        logger.debug("Pillow 未安装，无法提取图标")
+        # 获取 bitmap 信息
+        bmp = BITMAP()
+        gdi32.GetObjectW(icon_info.hbmColor, ctypes.sizeof(BITMAP), ctypes.byref(bmp))
+
+        width = bmp.bmWidth
+        height = bmp.bmHeight
+
+        # 准备 BITMAPINFO
+        bmi = BITMAPINFOHEADER()
+        bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+        bmi.biWidth = width
+        bmi.biHeight = -height  # top-down
+        bmi.biPlanes = 1
+        bmi.biBitCount = 32
+        bmi.biCompression = 0  # BI_RGB
+
+        # 获取位图数据
+        hdc = user32.GetDC(0)
+        buf_size = width * height * 4
+        buf = ctypes.create_string_buffer(buf_size)
+
+        gdi32.GetDIBits(
+            hdc,
+            icon_info.hbmColor,
+            0,
+            height,
+            buf,
+            ctypes.byref(bmi),
+            0,  # DIB_RGB_COLORS
+        )
+
+        user32.ReleaseDC(0, hdc)
+
+        # 转换 BGRA -> RGBA
+        raw = bytearray(buf.raw)
+        for i in range(0, len(raw), 4):
+            raw[i], raw[i + 2] = raw[i + 2], raw[i]
+
+        rgba_data = bytes(raw)
+
+        # 缩放到目标尺寸（最近邻）
+        if width != size or height != size:
+            rgba_data = _nearest_neighbor_resize(rgba_data, width, height, size, size)
+            width, height = size, size
+
+        # 纯 Python PNG 编码
+        png_bytes = _encode_png(rgba_data, width, height)
+        b64 = base64.b64encode(png_bytes).decode("ascii")
+
+        # 清理 GDI 对象
+        gdi32.DeleteObject(icon_info.hbmColor)
+        gdi32.DeleteObject(icon_info.hbmMask)
+        user32.DestroyIcon(large_icons[0])
+        if small_icons[0]:
+            user32.DestroyIcon(small_icons[0])
+
+        return b64
+
+    except Exception as e:
+        logger.debug("Win32 API 图标提取失败: %s", e)
         return None
 
 
@@ -610,6 +636,57 @@ async def extract_icon(
 # ── 目录内容列表端点（目录树） ───────────────────────────
 
 
+def _parse_lnk_target(lnk_path: str) -> str | None:
+    """解析 Windows .lnk 快捷方式文件，提取目标路径（纯 Python 实现）。"""
+    try:
+        with open(lnk_path, "rb") as f:
+            data = f.read()
+
+        # .lnk 文件最小 76 字节 (ShellLinkHeader)
+        if len(data) < 76:
+            return None
+
+        # 验证 HeaderSize (0x4C) 和 CLSID
+        header_size = struct.unpack_from("<I", data, 0)[0]
+        if header_size != 0x4C:
+            return None
+
+        flags = struct.unpack_from("<I", data, 20)[0]
+        has_link_target_id_list = flags & 0x01
+        has_link_info = flags & 0x02
+
+        offset = 76
+
+        # 跳过 LinkTargetIDList
+        if has_link_target_id_list:
+            if offset + 2 > len(data):
+                return None
+            id_list_size = struct.unpack_from("<H", data, offset)[0]
+            offset += 2 + id_list_size
+
+        # 解析 LinkInfo
+        if has_link_info:
+            if offset + 4 > len(data):
+                return None
+            link_info_size = struct.unpack_from("<I", data, offset)[0]
+            link_info_start = offset
+            if offset + 28 > len(data):
+                return None
+
+            link_info_flags = struct.unpack_from("<I", data, offset + 8)[0]
+            local_base_path_offset = struct.unpack_from("<I", data, offset + 16)[0]
+
+            if link_info_flags & 0x01 and local_base_path_offset:
+                # VolumeIDAndLocalBasePath
+                path_start = link_info_start + local_base_path_offset
+                path_end = data.index(b"\x00", path_start)
+                return data[path_start:path_end].decode("mbcs", errors="replace")
+
+        return None
+    except Exception:
+        return None
+
+
 class ListDirRequest(BaseModel):
     """目录列表请求"""
 
@@ -624,6 +701,7 @@ class ListDirItem(BaseModel):
     is_dir: bool
     is_symlink: bool = False
     symlink_target: str | None = None
+    link_type: str | None = None  # "symlink" | "junction" | "lnk" | None
     size: int | None = None  # 文件大小（字节），目录为 None
     modified_at: str | None = None  # ISO 格式修改时间
 
@@ -681,13 +759,44 @@ async def list_directory(
                 is_link = entry.is_symlink()
                 is_dir = entry.is_dir()
                 symlink_target: str | None = None
+                link_type: str | None = None
                 size: int | None = None
                 modified_at: str | None = None
 
+                # 检测 Windows 链接类型
                 if is_link:
+                    link_type = "symlink"
                     try:
                         symlink_target = str(os.readlink(entry))
                     except OSError:
+                        symlink_target = None
+                    # 区分 junction 和 symlink
+                    if is_dir and sys.platform == "win32":
+                        try:
+                            import ctypes as _ct
+
+                            FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
+                            IO_REPARSE_TAG_MOUNT_POINT = 0xA0000003
+                            attrs = _ct.windll.kernel32.GetFileAttributesW(str(entry))
+                            if attrs != -1 and attrs & FILE_ATTRIBUTE_REPARSE_POINT:
+                                # 简化判断: readlink 返回的 target 通常
+                                # 以 \\?\ 开头是 junction
+                                target_raw = symlink_target or ""
+                                if target_raw.startswith("\\\\?\\"):
+                                    link_type = "junction"
+                        except Exception:
+                            pass
+
+                # 检测 .lnk 快捷方式文件
+                elif (
+                    not is_dir
+                    and entry.name.lower().endswith(".lnk")
+                    and sys.platform == "win32"
+                ):
+                    link_type = "lnk"
+                    try:
+                        symlink_target = _parse_lnk_target(str(entry))
+                    except Exception:
                         symlink_target = None
 
                 try:
@@ -707,6 +816,7 @@ async def list_directory(
                         is_dir=is_dir,
                         is_symlink=is_link,
                         symlink_target=symlink_target,
+                        link_type=link_type,
                         size=size,
                         modified_at=modified_at,
                     )

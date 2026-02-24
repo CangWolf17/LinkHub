@@ -15,7 +15,7 @@ from typing import TypedDict
 logger = logging.getLogger(__name__)
 
 # ── 应用版本 ──────────────────────────────────────────────
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 
 
 # ── 目录条目类型 ──────────────────────────────────────────

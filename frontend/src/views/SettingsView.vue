@@ -524,6 +524,7 @@
       @confirm="onFolderPicked"
       @cancel="folderPickerIndex = null"
     />
+    <ConfirmDialog ref="confirmRef" />
   </div>
 </template>
 
@@ -542,6 +543,7 @@ import {
 } from '@/api'
 import type { LlmConfig, IndexStats, ScanDirsResponse, WorkspaceScanResponse, DirEntry, Software, Workspace } from '@/api'
 import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ApiUrlCombobox from '@/components/ApiUrlCombobox.vue'
 import { LLM_API_PRESETS } from '@/constants/llmPresets'
 import { FolderOpen, X, Plus, Eye, EyeOff } from 'lucide-vue-next'
@@ -556,6 +558,9 @@ const tabs = [
 
 type TabKey = (typeof tabs)[number]['key']
 const activeTab = ref<TabKey>('dirs')
+
+// 确认弹窗
+const confirmRef = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 
 // ── 白名单目录管理 ─────────────────────────────────────
 const allowedDirs = ref<DirEntry[]>([{ path: '', type: 'software' }])
@@ -943,7 +948,15 @@ const shuttingDown = ref(false)
 const shutdownMsg = ref('')
 
 async function confirmShutdown() {
-  if (!confirm('确定要关闭 LinkHub 服务吗？关闭后需要重新启动程序才能使用。')) return
+  const result = await confirmRef.value?.confirm({
+    title: '关闭服务',
+    message: '确定要关闭 LinkHub 服务吗？关闭后需要重新启动程序才能使用。',
+    buttons: [
+      { label: '取消', value: 'cancel', class: 'text-gray-600 bg-gray-100 hover:bg-gray-200 focus:ring-gray-400' },
+      { label: '关闭服务', value: 'ok', class: 'text-white bg-red-600 hover:bg-red-700 focus:ring-red-500' },
+    ],
+  })
+  if (result !== 'ok') return
   shuttingDown.value = true
   shutdownMsg.value = ''
   try {
