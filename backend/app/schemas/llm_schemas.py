@@ -112,6 +112,10 @@ class LLMConfigResponse(BaseModel):
     ai_blacklist_workspace: list[str] = Field(
         default_factory=list, description="AI 批量操作排除的工作区名列表"
     )
+    llm_dir_context_enabled: bool = Field(
+        True,
+        description="是否在 LLM 请求中附带目录文件上下文（关闭可防止敏感文件内容上传）",
+    )
 
 
 class LLMConfigUpdate(BaseModel):
@@ -126,3 +130,6 @@ class LLMConfigUpdate(BaseModel):
     llm_system_prompt_workspace: str | None = None
     ai_blacklist_software: list[str] | None = None
     ai_blacklist_workspace: list[str] | None = None
+    llm_dir_context_enabled: bool | None = Field(
+        None, description="是否在 LLM 请求中附带目录文件上下文"
+    )

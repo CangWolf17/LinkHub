@@ -70,58 +70,51 @@ async def _get_install_base_dir(db: AsyncSession) -> Path:
     )
 
 
+def _validate_archive_member_paths(member_names: list[str], target_dir: Path) -> None:
+    """校验压缩包成员路径，阻止路径穿越与绝对路径。"""
+    target_dir = target_dir.resolve()
+    for member_name in member_names:
+        if not member_name:
+            continue
+        if member_name.startswith(("/", "\\")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"压缩包包含绝对路径: {member_name}",
+            )
+        if len(member_name) > 1 and member_name[1] == ":" and member_name[0].isalpha():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"压缩包包含绝对路径: {member_name}",
+            )
+        member_path = target_dir / member_name
+        try:
+            resolved = member_path.resolve()
+        except OSError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"非法压缩包路径: {member_name}",
+            )
+        if not resolved.is_relative_to(target_dir):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"压缩包包含越界路径: {member_name}",
+            )
+
+
 def _safe_extract_zip(archive_path: Path, target_dir: Path) -> None:
     """安全解压 zip：阻止路径穿越。"""
-    target_dir = target_dir.resolve()
     with zipfile.ZipFile(archive_path, "r") as zf:
-        for member in zf.infolist():
-            member_name = member.filename
-            if member_name.startswith(("/", "\\")):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"压缩包包含绝对路径: {member_name}",
-                )
-            member_path = target_dir / member_name
-            try:
-                resolved = member_path.resolve()
-            except OSError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"非法压缩包路径: {member.filename}",
-                )
-            if not resolved.is_relative_to(target_dir):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"压缩包包含越界路径: {member.filename}",
-                )
+        _validate_archive_member_paths(
+            [member.filename for member in zf.infolist()], target_dir
+        )
         zf.extractall(target_dir)
 
 
 def _safe_extract_tar(archive_path: Path, target_dir: Path) -> None:
     """安全解压 tar 系列：阻止路径穿越。"""
-    target_dir = target_dir.resolve()
     with tarfile.open(archive_path, "r:*") as tf:
         members = tf.getmembers()
-        for member in members:
-            member_name = member.name
-            if member_name.startswith(("/", "\\")):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"压缩包包含绝对路径: {member_name}",
-                )
-            member_path = target_dir / member_name
-            try:
-                resolved = member_path.resolve()
-            except OSError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"非法压缩包路径: {member.name}",
-                )
-            if not resolved.is_relative_to(target_dir):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"压缩包包含越界路径: {member.name}",
-                )
+        _validate_archive_member_paths([member.name for member in members], target_dir)
         tf.extractall(target_dir, members=members, filter="data")
 
 
@@ -131,6 +124,7 @@ def _extract_7z(archive_path: Path, target_dir: Path) -> None:
         import py7zr
 
         with py7zr.SevenZipFile(archive_path, mode="r") as z:
+            _validate_archive_member_paths(z.getnames(), target_dir)
             z.extractall(path=target_dir)
     except ImportError:
         raise HTTPException(
@@ -381,16 +375,28 @@ async def upload_and_install(
         install_dir = base_dir / f"{software_name}_{counter}"
         software_name = f"{software_name}_{counter}"
 
-    # 创建临时文件保存上传内容
+    # 创建临时文件保存上传内容（流式写入，避免大文件内存溢出）
+    _UPLOAD_SIZE_LIMIT = 512 * 1024 * 1024  # 512 MB
     temp_archive = base_dir / f"_temp_{filename}"
     try:
         # 确保基础目录存在
         base_dir.mkdir(parents=True, exist_ok=True)
 
-        # 保存上传文件
+        # 流式写入，按 1 MB 分块，超出大小限制时中断
+        _CHUNK_SIZE = 1 * 1024 * 1024  # 1 MB
+        received = 0
         with open(temp_archive, "wb") as f:
-            content = await file.read()
-            f.write(content)
+            while True:
+                chunk = await file.read(_CHUNK_SIZE)
+                if not chunk:
+                    break
+                received += len(chunk)
+                if received > _UPLOAD_SIZE_LIMIT:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"文件超过上限 {_UPLOAD_SIZE_LIMIT // (1024 * 1024)} MB",
+                    )
+                f.write(chunk)
 
         # ── 3. 解压 ─────────────────────────────────────
         install_dir.mkdir(parents=True, exist_ok=True)

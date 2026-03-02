@@ -73,6 +73,10 @@ async def update_llm_config(
         if key == "llm_api_key" and value:
             value = encrypt_value(value)
 
+        # llm_dir_context_enabled: bool → "true"/"false" 字符串
+        if key == "llm_dir_context_enabled" and isinstance(value, bool):
+            value = "true" if value else "false"
+
         # 黑名单字段: list[str] → JSON 字符串
         if key in ("ai_blacklist_software", "ai_blacklist_workspace") and isinstance(
             value, list
@@ -111,6 +115,10 @@ def _parse_json_list(raw: str) -> list[str]:
 
 def _build_config_response(config: dict) -> LLMConfigResponse:
     """从 KV dict 构建 LLMConfigResponse。"""
+    # llm_dir_context_enabled 默认 true，值为 "false" 时关闭
+    dir_ctx_raw = config.get("llm_dir_context_enabled", "true").strip().lower()
+    dir_ctx_enabled = dir_ctx_raw != "false"
+
     return LLMConfigResponse(
         llm_base_url=config.get("llm_base_url", ""),
         has_api_key=bool(config.get("llm_api_key", "").strip()),
@@ -125,6 +133,7 @@ def _build_config_response(config: dict) -> LLMConfigResponse:
         ai_blacklist_workspace=_parse_json_list(
             config.get("ai_blacklist_workspace", "[]")
         ),
+        llm_dir_context_enabled=dir_ctx_enabled,
     )
 
 

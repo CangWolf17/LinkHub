@@ -44,6 +44,22 @@ router = APIRouter(prefix="/api/metadata", tags=["Metadata CRUD"])
 # ── 内部工具函数 ─────────────────────────────────────────
 
 
+async def _is_dir_context_enabled(db: AsyncSession) -> bool:
+    """
+    从 system_settings 读取 llm_dir_context_enabled 开关（默认开启）。
+    值为 "false"（大小写不敏感）时禁用目录上下文收集，防止敏感文件内容上传到 LLM。
+    """
+    from sqlalchemy import select as _select
+
+    result = await db.execute(
+        _select(SystemSetting).where(SystemSetting.key == "llm_dir_context_enabled")
+    )
+    row = result.scalar_one_or_none()
+    if row and str(row.value).strip().lower() == "false":
+        return False
+    return True
+
+
 def _collect_dir_context(dir_path: Path, max_files: int = 30) -> str:
     """
     收集目录上下文信息供 LLM 推断软件/项目用途:
@@ -406,13 +422,14 @@ async def generate_software_description(
             detail="LLM 未配置: model_chat 为空。",
         )
 
-    # 构建 prompt — 收集目录上下文丰富 LLM 输入
+    # 构建 prompt — 收集目录上下文丰富 LLM 输入（受 llm_dir_context_enabled 开关控制）
     exe_path = Path(item.executable_path) if item.executable_path else None
     dir_context = ""
-    if exe_path:
-        dir_context = _collect_dir_context(exe_path.parent)
-    elif item.install_dir:
-        dir_context = _collect_dir_context(Path(item.install_dir))
+    if await _is_dir_context_enabled(db):
+        if exe_path:
+            dir_context = _collect_dir_context(exe_path.parent)
+        elif item.install_dir:
+            dir_context = _collect_dir_context(Path(item.install_dir))
 
     custom_prompt = req.custom_prompt if req and req.custom_prompt else None
     prompt_mode = req.mode if req else "append"
@@ -579,10 +596,11 @@ async def generate_software_tags(
 
     exe_path = Path(item.executable_path) if item.executable_path else None
     dir_context = ""
-    if exe_path:
-        dir_context = _collect_dir_context(exe_path.parent)
-    elif item.install_dir:
-        dir_context = _collect_dir_context(Path(item.install_dir))
+    if await _is_dir_context_enabled(db):
+        if exe_path:
+            dir_context = _collect_dir_context(exe_path.parent)
+        elif item.install_dir:
+            dir_context = _collect_dir_context(Path(item.install_dir))
 
     context_block = f"\n\n目录文件信息:\n{dir_context}" if dir_context else ""
 
@@ -1040,9 +1058,11 @@ async def generate_workspace_description(
             detail="LLM 未配置: model_chat 为空。",
         )
 
-    # 构建 prompt — 收集目录上下文丰富 LLM 输入
+    # 构建 prompt — 收集目录上下文丰富 LLM 输入（受 llm_dir_context_enabled 开关控制）
     ws_dir = Path(item.directory_path)
-    dir_context = _collect_dir_context(ws_dir)
+    dir_context = ""
+    if await _is_dir_context_enabled(db):
+        dir_context = _collect_dir_context(ws_dir)
 
     custom_prompt = req.custom_prompt if req and req.custom_prompt else None
     prompt_mode = req.mode if req else "append"
@@ -1202,7 +1222,12 @@ async def ai_fill_workspace_form(
 
     dir_path = Path(req.directory_path)
     dir_name = dir_path.name
-    dir_context = _collect_dir_context(dir_path) if dir_path.is_dir() else ""
+    dir_context_enabled = await _is_dir_context_enabled(db)
+    dir_context = (
+        _collect_dir_context(dir_path)
+        if (dir_path.is_dir() and dir_context_enabled)
+        else ""
+    )
     context_block = f"\n\n目录文件信息:\n{dir_context}" if dir_context else ""
 
     system_prompt = (

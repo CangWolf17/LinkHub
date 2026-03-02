@@ -32,11 +32,19 @@ async_session_factory = async_sessionmaker(
 
 
 async def get_db() -> AsyncSession:
-    """FastAPI 依赖注入：提供数据库会话，请求结束后自动关闭。"""
+    """
+    FastAPI 依赖注入：提供数据库会话，请求结束后自动回滚并关闭。
+
+    事务策略说明:
+      - 各路由函数负责在写操作后显式调用 await db.commit()。
+      - 此依赖层仅在路由抛出异常时执行 rollback（避免脏数据残留）。
+      - 不在 yield 后自动 commit，原因：FastAPI yield 依赖的清理代码
+        在 HTTP 响应发出之后异步执行，可能晚于下一个请求的到达，
+        导致并发场景下读到未提交数据。
+    """
     async with async_session_factory() as session:
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise

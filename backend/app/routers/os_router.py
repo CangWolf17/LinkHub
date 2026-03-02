@@ -328,24 +328,27 @@ class BrowseDirResponse(BaseModel):
     response_model=BrowseDirResponse,
     summary="浏览本地目录（文件夹选择器）",
 )
-async def browse_directory(req: BrowseDirRequest):
+async def browse_directory(
+    req: BrowseDirRequest,
+    db: AsyncSession = Depends(get_db),
+):
     """
     列出指定目录下的子目录（不列出文件）。
     当 path 为空/null 时，Windows 下返回驱动器列表。
-    此端点不受白名单限制（因为用户就是在选择要添加的白名单目录）。
     """
-    # 如果没有指定路径，返回驱动器列表（Windows）
+    allowed_dirs = await _get_allowed_dirs(db)
+    allow_roots = not allowed_dirs
+
+    # 如果没有指定路径
     if not req.path or not req.path.strip():
-        if sys.platform == "win32":
-            drives: list[DirItem] = []
-            # 遍历 A-Z 盘符
-            for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-                drive = f"{letter}:\\"
-                if os.path.isdir(drive):
-                    drives.append(DirItem(name=f"{letter}:", path=drive))
-            return BrowseDirResponse(current="", parent=None, items=drives)
-        else:
-            # Linux/macOS: 返回根目录
+        if allow_roots:
+            if sys.platform == "win32":
+                drives: list[DirItem] = []
+                for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+                    drive = f"{letter}:\\"
+                    if os.path.isdir(drive):
+                        drives.append(DirItem(name=f"{letter}:", path=drive))
+                return BrowseDirResponse(current="", parent=None, items=drives)
             return BrowseDirResponse(
                 current="/",
                 parent=None,
@@ -355,6 +358,13 @@ async def browse_directory(req: BrowseDirRequest):
                     if os.path.isdir(f"/{d}")
                 ],
             )
+
+        roots = sorted({str(p) for p in allowed_dirs})
+        return BrowseDirResponse(
+            current="",
+            parent=None,
+            items=[DirItem(name=Path(p).name or p, path=p) for p in roots],
+        )
 
     raw = req.path.strip()
 
@@ -377,6 +387,12 @@ async def browse_directory(req: BrowseDirRequest):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"目录不存在: {resolved}",
+        )
+
+    if not allow_roots and not _validate_path_within_whitelist(resolved, allowed_dirs):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"路径不在允许的白名单目录内: {resolved}",
         )
 
     # 获取父目录
