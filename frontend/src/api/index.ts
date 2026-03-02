@@ -110,6 +110,17 @@ export interface InstallerUploadResponse {
   message: string
 }
 
+export interface InstallFromDirResponse {
+  success: boolean
+  software_id: string
+  name: string
+  executable_path: string
+  install_dir: string
+  description: string
+  exe_candidates: string[]
+  message: string
+}
+
 export interface ScanDirsResponse {
   success: boolean
   imported: number
@@ -151,8 +162,8 @@ export const getAllowedDirs = () =>
 export const updateAllowedDirs = (dirs: DirEntry[]) =>
   http.put<{ allowed_dirs: DirEntry[] }>('/system/allowed-dirs', { allowed_dirs: dirs })
 
-export const shutdownServer = () =>
-  http.post<{ message: string }>('/system/shutdown')
+export const shutdownServer = (token: string) =>
+  http.post<{ message: string }>('/system/shutdown', { token })
 
 export const getPortConfig = () =>
   http.get<{ current_port: number; configured_port: number }>('/system/port-config')
@@ -357,6 +368,9 @@ export const uploadInstall = (file: File) => {
 
 export const scanAndImportSoftware = () =>
   http.post<ScanDirsResponse>('/installer/scan-dirs', null, { timeout: 300_000 })
+
+export const installFromDir = (directoryPath: string) =>
+  http.post<InstallFromDirResponse>('/installer/install-from-dir', { directory_path: directoryPath }, { timeout: 300_000 })
 
 export const scanAndImportWorkspaces = () =>
   http.post<WorkspaceScanResponse>('/metadata/workspaces/scan', null, { timeout: 300_000 })

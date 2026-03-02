@@ -14,7 +14,7 @@ import logging
 import os
 from typing import Union
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,7 @@ from app.core.config import (
     _save_config_json,
     parse_allowed_dirs,
     serialize_allowed_dirs,
+    SHUTDOWN_TOKEN,
 )
 from app.core.database import get_db
 from app.models.models import PortableSoftware, SystemSetting, Workspace
@@ -157,6 +158,7 @@ async def get_port_config():
     return {
         "current_port": APP_PORT,
         "configured_port": user_config.get("port", 8147),
+        "shutdown_token": user_config.get("shutdown_token", ""),
     }
 
 
@@ -415,7 +417,7 @@ async def import_config(
     "/shutdown",
     summary="关闭 LinkHub 服务",
 )
-async def shutdown_server():
+async def shutdown_server(payload: dict = Body(default_factory=dict)):
     """
     优雅关闭整个 LinkHub 进程。
 
@@ -424,6 +426,13 @@ async def shutdown_server():
     开发模式发送 SIGINT 让 uvicorn 正常走 shutdown 流程。
     """
     import asyncio
+
+    token = str(payload.get("token", "")).strip()
+    if token != SHUTDOWN_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无效的关闭令牌",
+        )
 
     logger.info("收到关闭请求，服务将在 1 秒后终止...")
 

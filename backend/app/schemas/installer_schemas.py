@@ -21,6 +21,27 @@ class InstallerUploadResponse(BaseModel):
     message: str = Field("", description="处理状态消息")
 
 
+class InstallFromDirRequest(BaseModel):
+    """从本地文件夹安装软件的请求"""
+
+    directory_path: str = Field(..., description="本地文件夹的绝对路径")
+
+
+class InstallFromDirResponse(BaseModel):
+    """从本地文件夹安装软件的响应"""
+
+    success: bool
+    software_id: str = Field("", description="新创建的软件记录 ID")
+    name: str = Field("", description="检测到的软件名称")
+    executable_path: str = Field("", description="启发式寻址找到的核心可执行文件路径")
+    install_dir: str = Field("", description="软件所在目录")
+    description: str = Field("", description="LLM 生成的软件描述（可能为空）")
+    exe_candidates: list[str] = Field(
+        default_factory=list, description="扫描到的所有可执行文件候选列表"
+    )
+    message: str = Field("", description="处理状态消息")
+
+
 class ScanDirsResponse(BaseModel):
     """目录扫描导入响应"""
 

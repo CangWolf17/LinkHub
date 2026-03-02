@@ -34,7 +34,12 @@ from app.core.crypto import decrypt_value
 from app.core.database import get_db
 from app.core.vector_store import HAS_CHROMADB, get_software_collection
 from app.models.models import PortableSoftware, SystemSetting
-from app.schemas.installer_schemas import InstallerUploadResponse, ScanDirsResponse
+from app.schemas.installer_schemas import (
+    InstallFromDirRequest,
+    InstallFromDirResponse,
+    InstallerUploadResponse,
+    ScanDirsResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +70,59 @@ async def _get_install_base_dir(db: AsyncSession) -> Path:
     )
 
 
-def _extract_zip(archive_path: Path, target_dir: Path) -> None:
-    """解压 zip 文件到目标目录。"""
+def _safe_extract_zip(archive_path: Path, target_dir: Path) -> None:
+    """安全解压 zip：阻止路径穿越。"""
+    target_dir = target_dir.resolve()
     with zipfile.ZipFile(archive_path, "r") as zf:
+        for member in zf.infolist():
+            member_name = member.filename
+            if member_name.startswith(("/", "\\")):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"压缩包包含绝对路径: {member_name}",
+                )
+            member_path = target_dir / member_name
+            try:
+                resolved = member_path.resolve()
+            except OSError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"非法压缩包路径: {member.filename}",
+                )
+            if not resolved.is_relative_to(target_dir):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"压缩包包含越界路径: {member.filename}",
+                )
         zf.extractall(target_dir)
 
 
-def _extract_tar(archive_path: Path, target_dir: Path) -> None:
-    """解压 tar/tar.gz/tar.bz2/tar.xz 文件到目标目录。"""
+def _safe_extract_tar(archive_path: Path, target_dir: Path) -> None:
+    """安全解压 tar 系列：阻止路径穿越。"""
+    target_dir = target_dir.resolve()
     with tarfile.open(archive_path, "r:*") as tf:
-        tf.extractall(target_dir, filter="data")
+        members = tf.getmembers()
+        for member in members:
+            member_name = member.name
+            if member_name.startswith(("/", "\\")):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"压缩包包含绝对路径: {member_name}",
+                )
+            member_path = target_dir / member_name
+            try:
+                resolved = member_path.resolve()
+            except OSError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"非法压缩包路径: {member.name}",
+                )
+            if not resolved.is_relative_to(target_dir):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"压缩包包含越界路径: {member.name}",
+                )
+        tf.extractall(target_dir, members=members, filter="data")
 
 
 def _extract_7z(archive_path: Path, target_dir: Path) -> None:
@@ -100,11 +148,11 @@ def _extract_archive(archive_path: Path, target_dir: Path) -> None:
     suffix = archive_path.suffix.lower()
 
     if suffix == ".zip":
-        _extract_zip(archive_path, target_dir)
+        _safe_extract_zip(archive_path, target_dir)
     elif suffix == ".7z":
         _extract_7z(archive_path, target_dir)
     elif suffix in (".gz", ".tgz", ".bz2", ".xz", ".tar") or ".tar." in name:
-        _extract_tar(archive_path, target_dir)
+        _safe_extract_tar(archive_path, target_dir)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -446,6 +494,129 @@ async def upload_and_install(
                 temp_archive.unlink()
             except OSError:
                 pass
+
+
+# ── 从本地文件夹安装端点 ─────────────────────────────────
+
+
+@router.post(
+    "/install-from-dir",
+    response_model=InstallFromDirResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="从本地文件夹直接导入便携软件",
+)
+async def install_from_directory(
+    body: InstallFromDirRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    接收一个本地文件夹路径，将其作为已安装的便携软件导入：
+      1. 验证路径存在且为目录
+      2. 启发式扫描寻找核心可执行文件
+      3. 检查是否已存在（按路径和名称去重）
+      4. 调用 LLM 生成描述（失败不阻塞）
+      5. 写入 SQLite 数据库
+      6. 写入 ChromaDB 向量索引
+      7. 返回安装结果
+    """
+    dir_path = Path(body.directory_path)
+
+    # ── 1. 验证路径 ──────────────────────────────────────
+    if not dir_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"路径不存在: {dir_path}",
+        )
+    if not dir_path.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"路径不是文件夹: {dir_path}",
+        )
+
+    software_name = dir_path.name
+
+    # ── 2. 去重检查 ──────────────────────────────────────
+    # 按 install_dir 去重
+    existing_by_dir = await db.execute(
+        select(PortableSoftware).where(PortableSoftware.install_dir == str(dir_path))
+    )
+    if existing_by_dir.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"该目录已导入过: {dir_path}",
+        )
+
+    # 按名称去重
+    existing_by_name = await db.execute(
+        select(PortableSoftware).where(PortableSoftware.name == software_name)
+    )
+    if existing_by_name.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"同名软件已存在: {software_name}",
+        )
+
+    try:
+        # ── 3. 启发式寻址 ───────────────────────────────
+        executables = _find_executables(dir_path)
+
+        if not executables:
+            exe_path_str = ""
+            exe_candidates = []
+        else:
+            best_exe = _heuristic_pick(executables, software_name)
+            exe_path_str = str(best_exe) if best_exe else str(executables[0])
+            exe_candidates = [str(e) for e in executables[:20]]
+
+        # ── 4. LLM 描述生成（非阻塞） ──────────────────
+        description = await _generate_description_via_llm(
+            software_name, exe_path_str, db
+        )
+
+        # ── 5. 写入 SQLite ──────────────────────────────
+        item = PortableSoftware(
+            name=software_name,
+            executable_path=exe_path_str,
+            install_dir=str(dir_path),
+            description=description or None,
+        )
+        db.add(item)
+        await db.flush()
+        await db.refresh(item)
+        await db.commit()
+
+        logger.info(
+            "文件夹导入完成: %s -> %s (exe: %s)",
+            software_name,
+            dir_path,
+            exe_path_str,
+        )
+
+        # ── 6. 写入 ChromaDB 向量索引 ───────────────────
+        _index_to_chroma(item.id, software_name, description, exe_path_str)
+
+        # ── 7. 返回结果 ─────────────────────────────────
+        return InstallFromDirResponse(
+            success=True,
+            software_id=item.id,
+            name=software_name,
+            executable_path=exe_path_str,
+            install_dir=str(dir_path),
+            description=description,
+            exe_candidates=exe_candidates,
+            message="导入完成"
+            if exe_path_str
+            else "导入完成（未找到可执行文件，请手动指定）",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("文件夹导入失败: %s -> %s", software_name, e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"导入失败: {e}",
+        )
 
 
 # ── 扫描导入端点 ─────────────────────────────────────────

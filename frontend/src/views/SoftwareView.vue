@@ -116,10 +116,12 @@
         <!-- 上传压缩包 -->
         <div
           class="mb-4 border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer"
-          :class="isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'"
-          @dragenter.prevent="isDragging = true"
-          @dragover.prevent="isDragging = true"
-          @dragleave.prevent="isDragging = false"
+          :class="isDragging
+            ? (isDraggingFolder ? 'border-amber-500 bg-amber-50' : 'border-blue-500 bg-blue-50')
+            : 'border-gray-300 hover:border-gray-400'"
+          @dragenter.prevent="onDragEnter"
+          @dragover.prevent="onDragOver"
+          @dragleave.prevent="isDragging = false; isDraggingFolder = false"
           @drop.prevent="onDrop"
           @click="triggerFileInput"
         >
@@ -130,14 +132,30 @@
             </div>
             <div class="text-xs text-gray-500">{{ uploadMessage }}</div>
           </div>
+          <div v-else-if="isDraggingFolder">
+            <FolderInput :size="28" class="text-amber-500 mb-1 mx-auto" />
+            <p class="text-sm text-amber-600 font-medium">
+              松开以导入文件夹
+            </p>
+          </div>
           <div v-else>
             <Package :size="28" class="text-blue-500 mb-1 mx-auto" />
             <p class="text-sm text-gray-600">
-              拖入压缩包或 <span class="text-blue-600 underline">点击选择</span>
+              拖入压缩包 / 文件夹 或 <span class="text-blue-600 underline">点击选择压缩包</span>
             </p>
-            <p class="text-[11px] text-gray-400 mt-1">支持 .zip / .7z / .tar.gz</p>
+            <p class="text-[11px] text-gray-400 mt-1">支持 .zip / .7z / .tar.gz / 文件夹</p>
           </div>
         </div>
+
+        <!-- 选择文件夹导入 -->
+        <button
+          class="w-full py-2.5 mb-2 text-sm font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors flex items-center justify-center gap-2"
+          :disabled="folderInstalling"
+          @click="showFolderPicker = true"
+        >
+          <FolderInput :size="16" />
+          {{ folderInstalling ? '导入中...' : '选择文件夹导入' }}
+        </button>
 
         <!-- 扫描目录导入 -->
         <button
@@ -154,6 +172,13 @@
     </div>
 
     <input ref="fileInput" type="file" accept=".zip,.7z,.tar,.tar.gz,.tar.bz2,.tar.xz,.tgz" class="hidden" @change="onFileSelect" />
+
+    <!-- 文件夹选择对话框 -->
+    <FolderPickerDialog
+      v-if="showFolderPicker"
+      @confirm="onFolderPicked"
+      @cancel="showFolderPicker = false"
+    />
 
     <!-- 最近使用 -->
     <div v-if="recentItems.length > 0 && !loading" class="mb-6">
@@ -244,13 +269,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getSoftwareList, uploadInstall, deleteSoftware, updateSoftware, launchApp, openDir, cleanupDeadSoftware, generateSoftwareDescription, batchDeleteSoftware, scanAndImportSoftware, generateSoftwareTags, getLlmConfig } from '@/api'
+import { getSoftwareList, uploadInstall, installFromDir, deleteSoftware, updateSoftware, launchApp, openDir, cleanupDeadSoftware, generateSoftwareDescription, batchDeleteSoftware, scanAndImportSoftware, generateSoftwareTags, getLlmConfig } from '@/api'
 import type { Software } from '@/api'
 import SoftwareCard from '@/components/SoftwareCard.vue'
 import ContextMenu from '@/components/ContextMenu.vue'
 import type { ContextMenuItem } from '@/components/ContextMenu.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
-import { Unlink, X, ChevronDown, Package, Sparkles, Play, FolderOpen, Trash2, Eraser } from 'lucide-vue-next'
+import FolderPickerDialog from '@/components/FolderPickerDialog.vue'
+import { Unlink, X, ChevronDown, Package, Sparkles, Play, FolderOpen, Trash2, Eraser, FolderInput } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -275,6 +301,11 @@ const showMissing = ref(false)
 const showImportModal = ref(false)
 const scanning = ref(false)
 const scanResult = ref<{ success: boolean; message: string } | null>(null)
+
+// 文件夹导入状态
+const showFolderPicker = ref(false)
+const folderInstalling = ref(false)
+const isDraggingFolder = ref(false)
 
 // 排序状态（持久化到 localStorage）
 const sortBy = ref(localStorage.getItem('linkhub_sw_sortBy') || 'updated_desc')
@@ -475,10 +506,82 @@ function onFileSelect(e: Event) {
   target.value = ''
 }
 
+function onDragEnter(e: DragEvent) {
+  isDragging.value = true
+  // 检测拖入的是否为文件夹
+  const items = e.dataTransfer?.items
+  if (items && items.length > 0) {
+    const entry = items[0].webkitGetAsEntry?.()
+    isDraggingFolder.value = entry?.isDirectory ?? false
+  }
+}
+
+function onDragOver(e: DragEvent) {
+  isDragging.value = true
+  // 持续检测（某些浏览器 dragenter 时 items 可能不完整）
+  const items = e.dataTransfer?.items
+  if (items && items.length > 0) {
+    const entry = items[0].webkitGetAsEntry?.()
+    if (entry) {
+      isDraggingFolder.value = entry.isDirectory
+    }
+  }
+}
+
 function onDrop(e: DragEvent) {
   isDragging.value = false
+  isDraggingFolder.value = false
+
+  const items = e.dataTransfer?.items
+  if (items && items.length > 0) {
+    const entry = items[0].webkitGetAsEntry?.()
+    if (entry?.isDirectory) {
+      // 拖入的是文件夹，浏览器无法获取绝对路径，引导用户使用文件夹选择器
+      showFolderPicker.value = true
+      return
+    }
+  }
+
   const file = e.dataTransfer?.files[0]
   if (file) doUpload(file)
+}
+
+async function onFolderPicked(folderPath: string) {
+  showFolderPicker.value = false
+  if (!folderPath || folderInstalling.value) return
+
+  folderInstalling.value = true
+  uploading.value = true
+  uploadStage.value = '分析文件夹中...'
+  uploadProgress.value = 30
+  uploadMessage.value = folderPath
+
+  try {
+    uploadStage.value = '启发式寻址 + 分析中...'
+    uploadProgress.value = 60
+
+    const { data } = await installFromDir(folderPath)
+
+    uploadStage.value = '导入完成!'
+    uploadProgress.value = 100
+    uploadMessage.value = data.message
+
+    await new Promise((r) => setTimeout(r, 1500))
+    showImportModal.value = false
+    await loadList()
+  } catch (e: unknown) {
+    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '导入失败'
+    uploadStage.value = '导入失败'
+    uploadProgress.value = 0
+    uploadMessage.value = detail
+    await new Promise((r) => setTimeout(r, 3000))
+  } finally {
+    folderInstalling.value = false
+    uploading.value = false
+    uploadStage.value = ''
+    uploadProgress.value = 0
+    uploadMessage.value = ''
+  }
 }
 
 async function doUpload(file: File) {

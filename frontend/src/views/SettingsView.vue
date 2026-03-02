@@ -536,7 +536,7 @@ import {
   scanAndImportSoftware, scanAndImportWorkspaces,
   getAllowedDirs, updateAllowedDirs,
   shutdownServer,
-  getPortConfig, updatePortConfig,
+   getPortConfig, updatePortConfig,
   exportSettings, importSettings,
   getHealth,
   getSoftwareList, getWorkspaceList,
@@ -841,7 +841,7 @@ async function doScanWorkspaces() {
 }
 
 // ── 端口配置 ──────────────────────────────────────────
-const portForm = reactive({ port: 8147, currentPort: 8147 })
+const portForm = reactive({ port: 8147, currentPort: 8147, shutdownToken: '' })
 const savingPort = ref(false)
 const portMsg = ref('')
 const portMsgType = ref<'success' | 'error'>('success')
@@ -851,6 +851,7 @@ async function loadPortConfig() {
     const { data } = await getPortConfig()
     portForm.port = data.configured_port
     portForm.currentPort = data.current_port
+    portForm.shutdownToken = data.shutdown_token || ''
   } catch { /* ignore */ }
 }
 
@@ -960,7 +961,7 @@ async function confirmShutdown() {
   shuttingDown.value = true
   shutdownMsg.value = ''
   try {
-    await shutdownServer()
+    await shutdownServer(portForm.shutdownToken)
     shutdownMsg.value = '服务正在关闭，页面即将失去连接...'
   } catch {
     shutdownMsg.value = '服务已关闭'

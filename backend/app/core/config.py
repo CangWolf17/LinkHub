@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -116,6 +117,13 @@ def get_config_json_path() -> Path:
 
 _user_config = _load_config_json()
 APP_PORT = int(_user_config.get("port", _DEFAULT_PORT))
+
+# ── Shutdown Token (local-only guard) ───────────────────
+SHUTDOWN_TOKEN = str(_user_config.get("shutdown_token", "")).strip()
+if not SHUTDOWN_TOKEN:
+    SHUTDOWN_TOKEN = secrets.token_urlsafe(32)
+    _user_config["shutdown_token"] = SHUTDOWN_TOKEN
+    _save_config_json(_user_config)
 
 # ── OS Bridge 白名单默认值 ────────────────────────────────
 # 这些默认值仅在 system_settings 表中尚未配置时使用。
