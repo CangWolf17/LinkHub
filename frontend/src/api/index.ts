@@ -166,7 +166,7 @@ export const shutdownServer = (token: string) =>
   http.post<{ message: string }>('/system/shutdown', { token })
 
 export const getPortConfig = () =>
-  http.get<{ current_port: number; configured_port: number }>('/system/port-config')
+  http.get<{ current_port: number; configured_port: number; shutdown_token: string }>('/system/port-config')
 
 export const updatePortConfig = (port: number) =>
   http.put<{ message: string; configured_port: number; current_port: number }>('/system/port-config', { port })
